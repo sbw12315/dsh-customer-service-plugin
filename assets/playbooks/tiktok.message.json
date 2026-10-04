@@ -1,0 +1,50 @@
+{
+  "id": "tiktok.message",
+  "platform": "tiktok",
+  "platformLabel": "TikTok Shop",
+  "capability": "message",
+  "capabilityLabel": "买家消息 / 站内信",
+  "verified": false,
+  "note": "出厂模板，选择器全部为空且未校准。必须先在控制台的「校准模式」里对着真实店铺点选回填，并把 submit.verified 置为 true，发送按钮才会解锁。",
+  "entry": {
+    "url": "",
+    "storeOpen": true
+  },
+  "list": {
+    "waitFor": { "op": "waitElement", "selector": "", "timeoutMs": 20000 },
+    "items": { "selector": "", "unreadSelector": "", "refAttr": "" },
+    "extract": {
+      "from": "",
+      "subject": "",
+      "snippet": "",
+      "url": ""
+    }
+  },
+  "read": {
+    "steps": [
+      { "op": "click", "ref": "{{itemRef}}" },
+      { "op": "waitElement", "selector": "", "timeoutMs": 20000 }
+    ],
+    "extract": {
+      "body": { "op": "content", "format": "text", "selector": "", "maxLength": 8000 }
+    }
+  },
+  "reply": {
+    "steps": [
+      { "op": "input", "selector": "", "text": "{{draft}}", "clear": true, "timeoutMs": 15000 }
+    ]
+  },
+  "submit": {
+    "op": "click",
+    "selector": "",
+    "verified": false,
+    "waitNav": false,
+    "timeoutMs": 15000
+  },
+  "context": {
+    "order": {
+      "steps": [],
+      "extract": {}
+    }
+  }
+}

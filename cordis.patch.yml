@@ -1,0 +1,12 @@
+# dsh-customer-service-plugin —— 该 bundle 的 patch 层。
+#
+# 一行同时挂载两个半边：
+#   - Host 半   lib/index.js         （exports["."]，一个普通的 ESM 插件）
+#   - Client 半 lib/client.js        （exports["./client"]，由 package.json 的 dsh.client 声明）
+#
+# 这里刻意不写 `config:`。插件的全部设置都保存在它自己的 settings.json 里
+# （默认 <DSH_HOME>/customer-service/<profile>/），由控制台界面点击修改。
+# 这样同一个包在任何 DSH 实例上都不需要改动 YAML 就能安装启用。
+- insert:
+    - id: customer-service
+      name: 'dsh-customer-service-plugin'

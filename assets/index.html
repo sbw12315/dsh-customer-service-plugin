@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="cs-token" content="__CS_TOKEN__" />
+    <meta name="cs-version" content="__CS_VERSION__" />
+    <!-- 用 <base> 固定相对地址的解析基准，这样 /cs 与 /cs/ 两种访问方式下
+         fetch("api/health") 与 import("./page-x.js") 都会落到正确的前缀上。 -->
+    <base href="__CS_PREFIX__/" />
+    <title>客服控制台</title>
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">客服</span>
+        <span class="brand-title">客服控制台</span>
+        <span class="brand-version" id="version">__CS_VERSION__</span>
+      </div>
+      <nav class="mainnav" id="mainnav"></nav>
+      <div class="topbar-actions">
+        <button type="button" class="btn" id="refresh">刷新</button>
+        <label class="toggle" title="页面可见时每 60 秒自动刷新">
+          <input type="checkbox" id="auto" checked />
+          <span>自动刷新</span>
+        </label>
+        <a class="btn btn-ghost" href="./" target="_blank" rel="noreferrer">新标签打开</a>
+      </div>
+    </header>
+
+    <nav class="tabs subnav" id="subnav" hidden></nav>
+
+    <main class="content" id="content"></main>
+
+    <div class="toast" id="toast" hidden></div>
+    <script type="module" src="./js/main.js"></script>
+  </body>
+</html>
