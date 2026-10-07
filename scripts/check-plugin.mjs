@@ -93,12 +93,22 @@ line(mainModule.ok, '前端模块可加载', mainModule.ok ? '' : `HTTP ${mainMo
 const meta = await probe('/cs/api/meta');
 const stats = await probe('/cs/api/stats?days=7');
 const queue = await probe('/cs/api/queue?limit=1');
+const patrol = await probe('/cs/api/patrol');
+const drafts = await probe('/cs/api/drafts?limit=1');
 let metaOk = false;
 let statsOk = false;
 let queueOk = false;
 let queueTotal = null;
+let patrolOk = false;
+let patrolStores = null;
+let draftsOk = false;
+let draftsTotal = null;
 try {
-  metaOk = JSON.parse(meta.text).data?.dimensions?.channels?.length === 3;
+  const data = JSON.parse(meta.text).data;
+  metaOk =
+    data?.dimensions?.channels?.length === 4 &&
+    Boolean(data?.drafts?.statuses) &&
+    Boolean(data?.patrol?.defaults);
 } catch {
   metaOk = false;
 }
@@ -114,9 +124,25 @@ try {
 } catch {
   queueOk = false;
 }
-line(metaOk, 'GET /api/meta 可用', metaOk ? '' : '旧模块没有这个接口 → 需要重新安装或重启 DSH');
+try {
+  const parsed = JSON.parse(patrol.text);
+  patrolOk = typeof parsed.data?.running === 'boolean' && Array.isArray(parsed.data?.stores?.items);
+  patrolStores = parsed.data?.stores?.items?.length ?? null;
+} catch {
+  patrolOk = false;
+}
+try {
+  const parsed = JSON.parse(drafts.text);
+  draftsOk = Array.isArray(parsed.data?.items) && typeof parsed.data?.total === 'number';
+  draftsTotal = parsed.data?.total ?? null;
+} catch {
+  draftsOk = false;
+}
+line(metaOk, 'GET /api/meta 可用（含草稿与巡逻维度）', metaOk ? '' : '旧模块没有这些字段 → 需要重启 DSH');
 line(statsOk, 'GET /api/stats 可用');
 line(queueOk, 'GET /api/queue 可用', queueOk ? `现有 ${queueTotal} 条工单` : '');
+line(patrolOk, 'GET /api/patrol 可用（一键巡逻）', patrolOk ? `识别到 ${patrolStores} 家亚马逊店铺` : '重启 DSH 后可用');
+line(draftsOk, 'GET /api/drafts 可用（草稿库）', draftsOk ? `现有 ${draftsTotal} 条草稿` : '重启 DSH 后可用');
 
 console.log('');
 const verdict =
@@ -129,6 +155,8 @@ const verdict =
   mainModule.ok &&
   metaOk &&
   statsOk &&
-  queueOk;
+  queueOk &&
+  patrolOk &&
+  draftsOk;
 console.log(verdict ? '结论：一切正常。' : '结论：还有问题，见上面标 ✗ 的行。');
 process.exitCode = verdict ? 0 : 2;

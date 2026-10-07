@@ -96,7 +96,7 @@ test('挂载一条 /cs 前缀路由，并把出厂剧本种进数据目录', asy
     assert.equal(route.kind, 'prefix');
     assert.equal(route.path, '/cs');
     const seeded = fs.readdirSync(path.join(dataDir, 'playbooks')).sort();
-    assert.deepEqual(seeded, ['tiktok.message.json', 'walmart.message.json']);
+    assert.deepEqual(seeded, ['amazon.message.json', 'tiktok.message.json', 'walmart.message.json']);
     for (const sub of ['drafts', 'run']) {
       assert.ok(fs.existsSync(path.join(dataDir, sub)), `缺少 ${sub}`);
     }

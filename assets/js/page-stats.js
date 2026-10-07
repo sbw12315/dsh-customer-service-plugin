@@ -9,7 +9,7 @@ import { get, toQuery } from './api.js';
 import { badge, button, card, clear, emptyState, kv, node, panel, select, svgNode, toast } from './dom.js';
 import { DASH, barWidth, ms, num, pct, shortDay } from './format.js';
 
-const CHANNEL_LABEL = { mail: '飞书邮件', tiktok: 'TikTok Shop', walmart: 'Walmart' };
+const CHANNEL_LABEL = { mail: '飞书邮件', tiktok: 'TikTok Shop', walmart: 'Walmart', amazon: 'Amazon' };
 const KIND_LABEL = { message: '买家消息', review: '评价回复', afterSales: '售后工单', orderInquiry: '订单咨询' };
 const STATUS_LABEL = {
   new: '待处理',

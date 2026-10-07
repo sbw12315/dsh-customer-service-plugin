@@ -1,0 +1,106 @@
+{
+  "id": "amazon.message",
+  "platform": "amazon",
+  "platformLabel": "Amazon Seller Central（亚马逊卖家平台）",
+  "capability": "message",
+  "capabilityLabel": "买家与卖家消息服务",
+  "verified": true,
+  "note": "选择器是 2026-10 在真实 Amazon Seller Central（美国站，新 NGS 消息中心）实测校准的，读取链路 verified=true。发送链路 submit.verified 永远保持 false —— 本插件只生成草稿，人工点发送。",
+  "entry": {
+    "url": "https://sellercentral.amazon.com/messaging/inbox-v3?fi=responseNeeded",
+    "caseUrlTemplate": "https://sellercentral.amazon.com/messaging/inbox-v3?cc={caseId}&fi=responseNeeded",
+    "storeOpen": true
+  },
+  "list": {
+    "selector": ".case-list-items",
+    "waitFor": {
+      "op": "waitElement",
+      "selector": ".case-list-items",
+      "timeoutMs": 30000
+    },
+    "items": {
+      "selector": ".case-list-items .case-list-item",
+      "unreadSelector": ".case-status-badge.OPEN",
+      "orderIdAttr": "data-ph-capture-attribute-order-id",
+      "refAttr": ""
+    },
+    "extract": {
+      "from": ".case-list-item-header .buyer-name",
+      "date": ".case-list-item-header .formatted-date",
+      "country": ".case-list-item-header kat-flag",
+      "subject": ".case-list-item-body .subject",
+      "due": ".case-list-item-footer .badge-text"
+    }
+  },
+  "read": {
+    "selector": ".case-message-view",
+    "steps": [
+      {
+        "op": "click",
+        "selector": ".case-list-items .case-list-item:nth-child({{index1}})"
+      },
+      {
+        "op": "waitElement",
+        "selector": ".case-message-view",
+        "timeoutMs": 15000
+      }
+    ],
+    "extract": {
+      "buyer": {
+        "op": "text",
+        "selector": ".case-message-view-header .buyer-name"
+      },
+      "topic": {
+        "op": "text",
+        "selector": ".case-message-view-header .case-topic"
+      },
+      "messages": {
+        "op": "list",
+        "selector": ".case-message-view-messages .message-component"
+      },
+      "body": {
+        "op": "text",
+        "selector": ".message-body-text",
+        "maxLength": 8000
+      }
+    },
+    "caseIdFrom": "url:cc"
+  },
+  "reply": {
+    "editor": "freeform",
+    "openSelector": "kat-button[id=\"select-original-experience-button\"]",
+    "inputSelector": "textarea.fake-kat-textarea",
+    "maxLength": 4000,
+    "steps": [
+      {
+        "op": "click",
+        "selector": "kat-button[id=\"select-original-experience-button\"]"
+      },
+      {
+        "op": "waitElement",
+        "selector": "textarea.fake-kat-textarea",
+        "timeoutMs": 15000
+      },
+      {
+        "op": "input",
+        "selector": "textarea.fake-kat-textarea",
+        "text": "{{draft}}",
+        "clear": true
+      }
+    ]
+  },
+  "submit": {
+    "op": "click",
+    "selector": "",
+    "verified": false,
+    "never": true,
+    "note": "刻意留空并永久 verified=false：巡逻与本插件的任何接口都不会点它。发送只能由人在亚马逊页面上完成。"
+  },
+  "context": {
+    "order": {
+      "panelSelector": ".case-order-details, .order-details-panel",
+      "steps": [],
+      "extract": {}
+    }
+  }
+}

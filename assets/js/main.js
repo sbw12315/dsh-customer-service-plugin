@@ -11,8 +11,9 @@ import { byId, clear, node, toast } from './dom.js';
 
 /** 路由表。`group` 决定一级导航归属，`label` 是二级页签名。 */
 const ROUTES = [
-  { hash: '#/work/stats', group: 'work', label: '统计', load: () => import('./page-stats.js') },
+  { hash: '#/work/patrol', group: 'work', label: '巡逻', load: () => import('./page-patrol.js') },
   { hash: '#/work/queue', group: 'work', label: '队列', load: () => import('./page-queue.js') },
+  { hash: '#/work/stats', group: 'work', label: '统计', load: () => import('./page-stats.js') },
   { hash: '#/settings', group: 'settings', label: '设置', load: () => import('./page-settings.js') },
 ];
 
@@ -74,20 +75,47 @@ function renderSubNav(active) {
 }
 
 /**
- * 启动时确认宿主半的版本，只置标记，由每次渲染后统一贴提示。
+ * 这份前端资源要求宿主半提供的接口契约。
+ *
+ * 刻意**不比对版本号字符串**：页面顶栏的版本号是宿主半注入的（`__CS_VERSION__` 来自
+ * 被缓存的模块），旧后端会把它自己那个旧版本号注入进来，两边一比就是「相等」，
+ * 反而检测不出错配。要探的是**能力**：新前端要的接口在不在、渠道枚举里有没有 amazon。
+ */
+const HOST_CONTRACT = {
+  channels: ['amazon'],
+  metaKeys: ['drafts', 'patrol'],
+};
+
+/** 错配时把「缺了什么」记下来，贴在提示里，避免使用者只看到一句 404。 */
+let hostMismatchMissing = [];
+
+/**
+ * 启动时确认宿主半的能力是否跟得上这份前端资源，只置标记，由每次渲染后统一贴提示。
  *
  * 前端资源是**每次请求现读**的，而后端模块被 Node 按路径缓存 —— 改了插件之后
- * 很容易出现「页面已经是新版、接口还是旧版」的错配。这里主动探测一次，
- * 把「重启 DSH」这件事直接讲清楚，而不是让使用者面对一屏接口 404。
+ * 「页面已经是新版、接口还是旧版」是常态而不是异常。不主动探测的话，使用者看到的
+ * 只会是「未知接口 GET /patrol」这种没法处理的报错，也解释不了「渠道里怎么没有 Amazon」。
  * @returns {Promise<void>} 完成。
  */
 async function checkHostVersion() {
+  let meta = null;
   try {
-    await get('/meta');
-    hostMismatch = false;
+    meta = await get('/meta');
   } catch (cause) {
     hostMismatch = cause?.status === 404;
+    hostMismatchMissing = hostMismatch ? ['GET /api/meta'] : [];
+    return;
   }
+  const missing = [];
+  const channels = meta?.dimensions?.channels ?? [];
+  for (const channel of HOST_CONTRACT.channels) {
+    if (!channels.includes(channel)) missing.push(`渠道 ${channel}`);
+  }
+  for (const key of HOST_CONTRACT.metaKeys) {
+    if (!(meta && key in meta)) missing.push(`/api/meta 的 ${key}`);
+  }
+  hostMismatchMissing = missing;
+  hostMismatch = missing.length > 0;
 }
 
 /** 设置自动刷新开关。 */
@@ -123,11 +151,11 @@ function prependMismatchBanner(container) {
   if (!hostMismatch) return;
   container.prepend(
     node('div', { class: 'banner banner-error' }, [
-      node('strong', { text: '宿主半还是旧版本，接口对不上。' }),
+      node('strong', { text: '这页的界面是新的，但插件的后端还是旧版本，所以接口对不上。' }),
       node('span', {
-        text: ' 这个页面的资源是每次请求现读的，所以已经更新；但插件的后端模块被 Node 按文件路径缓存在内存里，必须重启 DSH 才会重新加载。请退出并重新打开 DSH。',
+        text: ` 缺少：${hostMismatchMissing.join('、')}。页面资源是每次请求现读的，所以已经更新；后端模块被 Node 按文件路径缓存在内存里，必须重启 DSH 才会重新加载。`,
       }),
-      node('span', { class: 'muted', text: ' 命令行确认：node scripts/check-plugin.mjs' }),
+      node('div', { class: 'muted', text: '请完全退出 DeepSeek Harness 再重新打开（只刷新页面没用）。命令行确认：node scripts/check-plugin.mjs' }),
     ]),
   );
 }
@@ -156,7 +184,11 @@ async function navigate() {
     clear(container);
     container.appendChild(
       node('div', { class: 'banner banner-error' }, [
-        node('span', { text: `页面加载失败：${cause?.message ?? cause}` }),
+        node('span', {
+          text: hostMismatch
+            ? `页面加载失败：${cause?.message ?? cause}（根因见上方提示）`
+            : `页面加载失败：${cause?.message ?? cause}`,
+        }),
       ]),
     );
   }

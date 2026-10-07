@@ -50,9 +50,25 @@ test('create 补默认值并写进文件，rev 递增', () => {
 
 test('create 校验渠道与类型，subject 不能为空', () => {
   const { queue } = makeQueue();
-  assert.throws(() => queue.create({ subject: 'x', channel: 'amazon' }), QueueError);
+  assert.throws(() => queue.create({ subject: 'x', channel: 'shopify' }), QueueError);
   assert.throws(() => queue.create({ subject: 'x', kind: 'refund' }), QueueError);
   assert.throws(() => queue.create({ subject: '   ' }), /subject 不能为空/);
+});
+
+test('patch 支持刷新摘要与草稿指针，且不把它们写进处理记录', () => {
+  const { queue } = makeQueue();
+  const { item } = queue.create({ subject: '亚马逊买家消息', channel: 'amazon' });
+  assert.equal(item.snippet, '');
+  assert.equal(item.draftId, null);
+
+  const patched = queue.patch(item.id, { snippet: '买家：玻璃碎了，要换货', draftId: 'd_1' });
+  assert.equal(patched.snippet, '买家：玻璃碎了，要换货');
+  assert.equal(patched.draftId, 'd_1');
+  assert.equal(patched.timeline.length, 1, '只有 created，不该多出记录');
+  assert.equal(patched.timeline[0].action, 'created');
+
+  // 空摘要不会把已有摘要抹掉（首轮读到空内容时不该覆盖掉好的）。
+  assert.equal(queue.patch(item.id, { snippet: '' }).snippet, '买家：玻璃碎了，要换货');
 });
 
 test('create 用 idempotencyKey 去重，重复提交返回既有条目', () => {

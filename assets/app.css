@@ -847,3 +847,134 @@ code {
 select {
   font-family: inherit;
 }
+
+/* ── 巡逻页 ───────────────────────────────────────────────────────────── */
+
+.patrol-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 4px 0 12px;
+}
+
+.patrol-hero-main {
+  flex: 1 1 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.patrol-hero-hint {
+  line-height: 1.6;
+  max-width: 720px;
+}
+
+.patrol-last {
+  align-self: center;
+  font-size: 12px;
+}
+
+.btn-xl {
+  padding: 12px 20px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 10px;
+}
+
+.btn.is-busy,
+.btn[disabled] {
+  opacity: 0.65;
+  cursor: progress;
+}
+
+.patrol-options {
+  padding-top: 4px;
+  border-top: 1px dashed var(--cs-border);
+}
+
+.field-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.field-check input[type='checkbox'] {
+  margin: 0;
+}
+
+.panel-sub {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--cs-border);
+}
+
+.store-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.store-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--cs-border);
+  border-radius: 999px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.store-chip-name {
+  font-weight: 600;
+}
+
+.patrol-bar {
+  height: 8px;
+  margin: 12px 0;
+  border-radius: 999px;
+  background: var(--cs-border);
+  overflow: hidden;
+}
+
+.patrol-bar-fill {
+  height: 100%;
+  background: var(--cs-brand);
+  transition: width 0.3s ease;
+}
+
+.logbox {
+  margin-top: 12px;
+}
+
+.logbox summary {
+  cursor: pointer;
+  color: var(--cs-text-dim);
+  font-size: 12px;
+}
+
+.drawer-wide {
+  width: min(720px, 92vw);
+}
+
+.draft-body {
+  width: 100%;
+  min-height: 260px;
+  font-family: var(--cs-mono);
+  font-size: 12px;
+  line-height: 1.65;
+  padding: 10px;
+  border: 1px solid var(--cs-border);
+  border-radius: 8px;
+  background: var(--cs-bg);
+  color: var(--cs-text);
+  resize: vertical;
+}
+
+.banner-warn {
+  border-color: var(--cs-warn);
+  color: var(--cs-warn);
+}
+

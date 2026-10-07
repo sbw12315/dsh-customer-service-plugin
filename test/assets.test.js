@@ -73,10 +73,25 @@ test('模块之间只用相对路径互相引用，保证挂任意前缀都能�
 
 test('页面模块都导出 render，外壳按这个契约调用', async () => {
   const dir = path.join(ASSETS, 'js');
-  for (const name of ['page-stats.js', 'page-queue.js', 'page-settings.js']) {
+  for (const name of ['page-patrol.js', 'page-stats.js', 'page-queue.js', 'page-settings.js']) {
     const text = fs.readFileSync(path.join(dir, name), 'utf8');
     assert.match(text, /export async function render\(/, `${name} 必须导出 render`);
   }
+});
+
+test('外壳按「能力」探测宿主半是否跟得上，而不是比对版本号字符串', () => {
+  const text = fs.readFileSync(path.join(ASSETS, 'js', 'main.js'), 'utf8');
+  // 版本号是宿主半注入的：旧后端会把自己那个旧版本号注入进来，两边一比就是「相等」，
+  // 所以必须探能力（新前端要的接口在不在、渠道里有没有 amazon）。
+  assert.match(text, /HOST_CONTRACT/, '需要有明确的接口契约声明');
+  assert.match(text, /channels:\s*\[\s*'amazon'\s*\]/, '契约里要包含 amazon 渠道');
+  assert.match(text, /metaKeys:\s*\[[^\]]*'drafts'[^\]]*'patrol'/, '契约里要包含 drafts / patrol');
+  // 退化回「只要 /meta 不 404 就算同步」是错的：旧宿主半的 /meta 是存在的。
+  assert.equal(
+    /await get\('\/meta'\);\s*\n\s*hostMismatch = false;/.test(text),
+    false,
+    '不能再只看 /meta 是否 404',
+  );
 });
 
 test('控制台页面里不出现任何绝对地址（必须走相对路径 + <base>）', async () => {

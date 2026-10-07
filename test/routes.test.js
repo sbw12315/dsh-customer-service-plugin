@@ -4,7 +4,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { apply, intOf, matchPath, matchRoute } from '../lib/index.js';
+import { ROUTES, apply, intOf, matchPath, matchRoute } from '../lib/index.js';
 
 /** 造一个只实现插件用到的那部分能力的 ctx。 */
 function fakeContext() {
@@ -114,7 +114,7 @@ test('GET /api/meta 暴露维度与跃迁表，避免前后端各写一份', asy
   await withPlugin(async ({ call }) => {
     const { status, payload } = await call('GET', '/meta');
     assert.equal(status, 200);
-    assert.deepEqual(payload.data.dimensions.channels, ['mail', 'tiktok', 'walmart']);
+    assert.deepEqual(payload.data.dimensions.channels, ['mail', 'tiktok', 'walmart', 'amazon']);
     assert.ok(payload.data.dimensions.statuses.includes('needs_human'));
     assert.deepEqual(payload.data.transitions.new, ['drafted', 'needs_human', 'archived']);
     assert.equal(payload.data.transitions.new.includes('sent'), false);
@@ -238,3 +238,49 @@ test('改数据目录后，队列与审计一起切到新目录', async () => {
     fs.rmSync(next, { recursive: true, force: true });
   });
 });
+
+test('巡逻接口：状态可读、能启动、能停止，且草稿库为空时返回空列表', async () => {
+  await withPlugin(async ({ call }) => {
+    const before = await call('GET', '/patrol');
+    assert.equal(before.status, 200);
+    assert.equal(before.payload.data.running, false);
+    assert.equal(before.payload.data.run, null);
+    assert.ok(Array.isArray(before.payload.data.stores.items));
+    assert.ok(before.payload.data.defaults.maxPerStore >= 1);
+
+    const drafts = await call('GET', '/drafts');
+    assert.equal(drafts.status, 200);
+    assert.deepEqual(drafts.payload.data.items, []);
+    assert.equal(drafts.payload.data.total, 0);
+
+    // 假 subprocess 只会回一行版本号，所以「店铺列表」是空的 —— 巡逻会立刻正常收工。
+    const started = await call('POST', '/patrol', { maxPerStore: 2 });
+    assert.equal(started.status, 202);
+    assert.equal(started.payload.data.run.options.maxPerStore, 2);
+
+    const stopped = await call('POST', '/patrol/stop', {});
+    assert.equal(stopped.status, 200);
+    assert.equal(typeof stopped.payload.data.stopped, 'boolean');
+  });
+});
+
+test('草稿接口：写操作要令牌，改不存在的草稿返回 404', async () => {
+  await withPlugin(async ({ call }) => {
+    const forbidden = await call('PATCH', '/drafts/d_x', { body: 'hi' }, { withToken: false });
+    assert.equal(forbidden.status, 403);
+
+    const missing = await call('PATCH', '/drafts/d_x', { body: 'hi' });
+    assert.equal(missing.status, 404);
+
+    const missingFill = await call('POST', '/drafts/d_x/fill', {});
+    assert.equal(missingFill.status, 404);
+  });
+});
+
+test('巡逻只写草稿：接口表里不存在任何「发送」路由', () => {
+  const paths = ROUTES.map((route) => `${route.method} ${route.path}`);
+  assert.equal(paths.some((entry) => /send|发送/i.test(entry)), false);
+  assert.ok(paths.includes('POST /patrol'), '一键巡逻入口');
+  assert.ok(paths.includes('POST /drafts/:id/fill'), '人工触发的「填入回复框」入口');
+});
+
