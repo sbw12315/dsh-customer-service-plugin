@@ -10,18 +10,36 @@ import { ROUTES, apply, intOf, matchPath, matchRoute } from '../lib/index.js';
 function fakeContext() {
   const routes = [];
   const spawns = [];
+  /**
+   * 测试可以现场改这里，模拟真实运营动作：
+   *   `fake.storeRows`     —— 紫鸟账号下的店铺（中途 push/splice 就等于「新增/删除了店铺」）
+   *   `fake.failStoreList` —— 让 `store list` 失败，验证扫描失败时的降级
+   */
+  const fake = { storeRows: [], failStoreList: false };
+
   const subprocess = {
     resolveExecutable: async (command) => `/fake/bin/${command}`,
     spawn(spec) {
       spawns.push(spec);
-      const text = String(spec.argv[0]).includes('ziniao')
-        ? 'ziniao-cli version 1.1.3\n'
-        : 'lark-cli version 1.0.71\n';
+      const isZiniao = String(spec.argv[0]).includes('ziniao');
+      const isStoreList = isZiniao && spec.argv.includes('store') && spec.argv.includes('list');
+      let text = isZiniao ? 'ziniao-cli version 1.1.3\n' : 'lark-cli version 1.0.71\n';
+      let errText = '';
+      let exitCode = 0;
+      if (isStoreList) {
+        if (fake.failStoreList) {
+          exitCode = 1;
+          text = '';
+          errText = 'Error: 紫鸟客户端未登录\n';
+        } else {
+          text = JSON.stringify({ ok: true, data: { items: fake.storeRows } });
+        }
+      }
       return {
-        done: Promise.resolve({ exitCode: 0, signal: null }),
+        done: Promise.resolve({ exitCode, signal: null }),
         collected: {
           stdout: { readFrom: () => ({ text, nextOffset: 0, lossy: false }) },
-          stderr: { readFrom: () => ({ text: '', nextOffset: 0, lossy: false }) },
+          stderr: { readFrom: () => ({ text: errText, nextOffset: 0, lossy: false }) },
         },
       };
     },
@@ -29,6 +47,7 @@ function fakeContext() {
   return {
     routes,
     spawns,
+    fake,
     effect: (fn) => fn(),
     on() {},
     get: (key) => (key === 'subprocess' ? subprocess : undefined),
@@ -245,7 +264,8 @@ test('巡逻接口：状态可读、能启动、能停止，且草稿库为空�
     assert.equal(before.status, 200);
     assert.equal(before.payload.data.running, false);
     assert.equal(before.payload.data.run, null);
-    assert.ok(Array.isArray(before.payload.data.stores.items));
+    assert.ok(Array.isArray(before.payload.data.sources.amazon.items));
+    assert.ok(Array.isArray(before.payload.data.channels), '要带上渠道清单');
     assert.ok(before.payload.data.defaults.maxPerStore >= 1);
 
     const drafts = await call('GET', '/drafts');
@@ -274,6 +294,74 @@ test('草稿接口：写操作要令牌，改不存在的草稿返回 404', asyn
 
     const missingFill = await call('POST', '/drafts/d_x/fill', {});
     assert.equal(missingFill.status, 404);
+  });
+});
+
+test('扫描可用店铺：认得出新增的亚马逊店，并把非亚马逊店列进 skipped', async () => {
+  await withPlugin(async ({ call, ctx }) => {
+    ctx.fake.storeRows.push(
+      { storeId: 'a', storeName: 'Amazon-Cozynome-管理员', platformName: '亚马逊-美国' },
+      { storeId: 'b', storeName: 'Walmart-Cozynome-管理员', platformName: '沃尔玛-全球' },
+    );
+
+    const first = await call('POST', '/patrol/scan', {});
+    assert.equal(first.status, 200);
+    // 返回的是「渠道 id → 扫描结果」，亚马逊渠道之外还有飞书邮箱渠道。
+    const one = first.payload.data.amazon;
+    assert.equal(one.total, 2, 'total 是全量店铺数');
+    assert.deepEqual(one.items.map((store) => store.storeId), ['a'], 'items 只放能巡逻的亚马逊店');
+    assert.deepEqual(one.skipped.map((store) => store.storeId), ['b']);
+    assert.match(one.skipped[0].reason, /亚马逊/);
+    assert.deepEqual(one.added, [], '首次扫描没有基准，不该报「新增」');
+    assert.deepEqual(one.removed, []);
+    assert.equal(one.error, null);
+    assert.ok(first.payload.data['lark-mail'], '飞书邮箱渠道也要在结果里（未授权时带 error）');
+
+    // 运营在紫鸟里新增了一家亚马逊店
+    ctx.fake.storeRows.push({ storeId: 'c', storeName: 'Amazon-FUSOU-客服', platformName: '亚马逊-美国' });
+    const second = await call('POST', '/patrol/scan', {});
+    assert.deepEqual(second.payload.data.amazon.added.map((store) => store.storeId), ['c']);
+    assert.equal(second.payload.data.amazon.items.length, 2);
+
+    // 又移除了一家
+    ctx.fake.storeRows.splice(0, 1);
+    const third = await call('POST', '/patrol/scan', {});
+    assert.deepEqual(third.payload.data.amazon.removed.map((store) => store.storeId), ['a']);
+    assert.deepEqual(third.payload.data.amazon.items.map((store) => store.storeId), ['c']);
+  });
+});
+
+test('扫描可以只扫指定渠道', async () => {
+  await withPlugin(async ({ call }) => {
+    const { payload } = await call('POST', '/patrol/scan', { channels: ['amazon'] });
+    assert.deepEqual(Object.keys(payload.data), ['amazon']);
+  });
+});
+
+test('扫描失败时保留上一次的店铺列表，只把错误附上', async () => {
+  await withPlugin(async ({ call, ctx }) => {
+    ctx.fake.storeRows.push({ storeId: 'a', storeName: 'Amazon-Cozynome-管理员', platformName: '亚马逊-美国' });
+    await call('POST', '/patrol/scan', {});
+
+    ctx.fake.failStoreList = true;
+    const failed = await call('POST', '/patrol/scan', {});
+    assert.equal(failed.status, 200);
+    assert.ok(failed.payload.data.amazon.error, '应该带上错误');
+    assert.equal(failed.payload.data.amazon.items.length, 1, '扫描失败不该把已知店铺清空');
+    assert.deepEqual(failed.payload.data.amazon.added, [], '失败时不报差异');
+  });
+});
+
+test('扫描要带控制台令牌；GET /api/patrol/stores 走同一套结果', async () => {
+  await withPlugin(async ({ call, ctx }) => {
+    const forbidden = await call('POST', '/patrol/scan', {}, { withToken: false });
+    assert.equal(forbidden.status, 403, '扫描是写动作，必须校验令牌');
+
+    ctx.fake.storeRows.push({ storeId: 'a', storeName: 'Amazon-A', platformName: '亚马逊-美国' });
+    const { status, payload } = await call('GET', '/patrol/stores?refresh=1');
+    assert.equal(status, 200);
+    assert.equal(payload.data.total, 1);
+    assert.ok(Array.isArray(payload.data.skipped));
   });
 });
 

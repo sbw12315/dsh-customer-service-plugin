@@ -128,11 +128,16 @@ test('adapter.visitInbox：被弹回登录页时报「未登录」，而不是�
   await assert.rejects(() => adapter.visitInbox({ storeId: '1', storeName: 'Amazon-Homiberry-管理员' }), /店铺未登录/);
 });
 
-test('adapter.listStores：只返回亚马逊店铺', async () => {
+test('adapter.listAllStores 给全量、listStores 只给亚马逊店', async () => {
   const ziniao = fakeZiniao({ 'store list': () => STORE_LIST });
   const adapter = createAmazonAdapter({ ziniao });
-  const stores = await adapter.listStores();
-  assert.deepEqual(stores.map((store) => store.storeId), ['27630232762680', '27999999999999']);
+
+  // 「扫描可用店铺」要看到全量：非亚马逊店也得列出来，界面才能解释它为什么不被巡逻。
+  const all = await adapter.listAllStores();
+  assert.deepEqual(all.map((store) => store.storeId), ['27630232762680', '27800343767219', '27999999999999']);
+
+  const amazon = await adapter.listStores();
+  assert.deepEqual(amazon.map((store) => store.storeId), ['27630232762680', '27999999999999']);
 });
 
 test('adapter.extractList：解出会话列表与到期时间', async () => {

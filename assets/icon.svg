@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="客服控制台">
+  <title>客服控制台</title>
+  <defs>
+    <linearGradient id="cs-icon-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4a82ff"/>
+      <stop offset="1" stop-color="#2450e0"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#cs-icon-bg)"/>
+  <!-- 客服耳机：听筒带 + 两只耳罩 + 麦克风。与 lib/client.js 里的内联图标同一套路径。 -->
+  <g transform="translate(8 8) scale(2)" fill="none" stroke="#ffffff" stroke-width="2"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 10a8 8 0 0 1 16 0"/>
+    <rect x="1.5" y="10" width="5" height="7" rx="2.5"/>
+    <rect x="17.5" y="10" width="5" height="7" rx="2.5"/>
+    <path d="M20 17v1.5a3 3 0 0 1-3 3h-3.5"/>
+  </g>
+</svg>

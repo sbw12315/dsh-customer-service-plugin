@@ -156,6 +156,13 @@ function settingsForm() {
         field('飞书CLI 附加参数（身份 / profile）', textInput('cli-args-lark', (s.cliArgs.lark ?? []).join(' '), '例如 --profile 你的profile名')),
       ]),
       node('div', { class: 'field-row' }, [
+        field(
+          '巡逻邮箱（飞书）',
+          textInput('mailboxes', (s.mailboxes ?? []).join(' '), 'support@fusou.vip'),
+          '空格或逗号分隔。邮件走 bot 身份，而 bot 无法自动枚举邮箱，所以必须在这里显式填写；留空 = 不巡逻任何邮箱',
+        ),
+      ]),
+      node('div', { class: 'field-row' }, [
         field('数据目录', textInput('data-dir', s.dataDir, '留空使用默认目录'), '计划、队列、草稿、审计都放这里'),
         field(
           'SLA 默认时长（小时）',
@@ -182,6 +189,7 @@ async function save(stateLabel) {
     const saved = await post('/settings', {
       cliPaths: { ziniao: valueOf('cli-ziniao').trim(), lark: valueOf('cli-lark').trim() },
       cliArgs: { ziniao: valueOf('cli-args-ziniao'), lark: valueOf('cli-args-lark') },
+      mailboxes: valueOf('mailboxes'),
       dataDir: valueOf('data-dir').trim(),
       sla: { defaultHours: valueOf('sla-hours') },
       retention: { auditDays: valueOf('audit-days') },

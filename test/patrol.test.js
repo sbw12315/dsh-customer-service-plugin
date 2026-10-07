@@ -43,8 +43,40 @@ function fakeAdapter(opts = {}) {
   return {
     id: 'amazon',
     label: '亚马逊',
+    kind: 'store',
     inboxUrl: 'https://example.test/inbox',
+    queueChannel: 'amazon',
+    draftKind: 'amazon',
+    conversationId: (thread) => /[?&]cc=([^&]+)/.exec(thread?.url ?? '')?.[1] ?? '',
     calls,
+
+    /* ── 巡逻面（引擎只认这几个） ── */
+    async listSources() {
+      calls.push(['listStores']);
+      return stores;
+    },
+    async prepare(store) {
+      await this.openStore(store);
+      await this.visitInbox(store);
+      if (!(await this.waitForInbox(store))) {
+        throw Object.assign(new Error('收件箱没有加载出来（通常是该店铺未登录）'), { kind: 'page' });
+      }
+    },
+    async listConversations(store) {
+      const list = await this.extractList(store);
+      return {
+        ...list,
+        items: list.items.map((item) => ({ ...item, dueMinutes: 30 })),
+      };
+    },
+    async readConversation(store, item) {
+      await this.openConversation(store, item.index);
+      return this.extractThread(store);
+    },
+    async closeSource(store) {
+      await this.closeStore(store);
+    },
+
     async listStores() {
       calls.push(['listStores']);
       return stores;
@@ -98,7 +130,7 @@ function makeService(adapter, settings = {}) {
   const drafts = createDraftStore({ dir: path.join(dir, 'drafts'), logger: silent });
   const queue = createQueueStore({ file: path.join(dir, 'queue.json'), logger: silent });
   const service = createPatrolService({
-    adapter,
+    adapters: { [adapter.id]: adapter },
     drafts,
     queue,
     settings,
@@ -108,15 +140,20 @@ function makeService(adapter, settings = {}) {
   return { service, drafts, queue, dir };
 }
 
-test('normalizePatrolOptions：收敛数值并过滤空 storeId', () => {
-  const defaults = { maxStores: 0, maxPerStore: 3, headless: false, closeAfter: false };
-  assert.deepEqual(normalizePatrolOptions({ maxPerStore: 999, storeIds: ['a', '', ' b '] }, defaults), {
+test('normalizePatrolOptions：收敛数值、渠道与目标 id', () => {
+  const defaults = { maxStores: 0, maxPerStore: 3, headless: false, closeAfter: false, channels: [], writeMailDrafts: false };
+  assert.deepEqual(normalizePatrolOptions({ maxPerStore: 999, sourceIds: ['a', '', ' b '] }, defaults), {
     maxStores: 0,
     maxPerStore: 50,
     headless: false,
     closeAfter: false,
-    storeIds: ['a', 'b'],
+    channels: [],
+    writeMailDrafts: false,
+    sourceIds: ['a', 'b'],
   });
+  // 旧前端字段名 storeIds 仍然认。
+  assert.deepEqual(normalizePatrolOptions({ storeIds: ['x'] }, defaults).sourceIds, ['x']);
+  assert.deepEqual(normalizePatrolOptions({ channels: ['amazon', 'lark-mail'] }, defaults).channels, ['amazon', 'lark-mail']);
   assert.equal(normalizePatrolOptions({ maxStores: -5 }, defaults).maxStores, 0);
   assert.equal(normalizePatrolOptions({}, defaults).maxPerStore, 3);
 });
@@ -130,9 +167,9 @@ test('巡逻全流程：两家店都过一遍，按会话生成草稿并入队',
   const run = service.snapshot().run;
 
   assert.equal(run.status, 'done');
-  assert.equal(run.progress.storesTotal, 2);
-  assert.equal(run.progress.storesDone, 2);
-  assert.equal(run.progress.storesFailed, 0);
+  assert.equal(run.progress.sourcesTotal, 2);
+  assert.equal(run.progress.sourcesDone, 2);
+  assert.equal(run.progress.sourcesFailed, 0);
   // 默认每店 3 条，s1 有 2 条、s2 有 1 条。
   assert.equal(run.progress.draftsCreated, 3);
   assert.equal(drafts.counts().total, 3);
@@ -186,9 +223,9 @@ test('一家店失败不影响其它店：失败的记下来，后面的继续�
   const run = service.snapshot().run;
 
   assert.equal(run.status, 'done');
-  assert.equal(run.progress.storesFailed, 1);
+  assert.equal(run.progress.sourcesFailed, 1);
   assert.equal(run.progress.draftsCreated, 1);
-  const failed = run.stores.find((store) => store.storeId === 's1');
+  const failed = run.sources.find((store) => store.storeId === 's1');
   assert.equal(failed.status, 'failed');
   assert.match(failed.error, /打不开店铺 s1/);
   assert.equal(drafts.list({}).items[0].buyer, 'sharon');
@@ -200,8 +237,8 @@ test('收件箱没加载出来（未登录）算这家店失败，而不是静�
   service.start({});
   await waitFor(() => service.snapshot().run.status !== 'running');
   const run = service.snapshot().run;
-  assert.equal(run.progress.storesFailed, 2);
-  assert.match(run.stores[0].error, /未登录/);
+  assert.equal(run.progress.sourcesFailed, 2);
+  assert.match(run.sources[0].error, /未登录/);
 });
 
 test('重复巡逻不产生重复草稿：第二次是更新', async () => {
@@ -226,7 +263,7 @@ test('只巡逻选中的店铺', async () => {
   const { service, drafts } = makeService(adapter);
   service.start({ storeIds: ['s2'] });
   await waitFor(() => service.snapshot().run.status !== 'running');
-  assert.equal(service.snapshot().run.progress.storesTotal, 1);
+  assert.equal(service.snapshot().run.progress.sourcesTotal, 1);
   assert.deepEqual(drafts.list({}).items.map((item) => item.buyer), ['sharon']);
 });
 
@@ -237,7 +274,7 @@ test('没有店铺时立刻正常结束，不算失败', async () => {
   await waitFor(() => service.snapshot().run.status !== 'running');
   const run = service.snapshot().run;
   assert.equal(run.status, 'done');
-  assert.equal(run.progress.storesTotal, 0);
+  assert.equal(run.progress.sourcesTotal, 0);
 });
 
 test('同时只能跑一次巡逻', async () => {
@@ -263,7 +300,7 @@ test('巡逻状态落盘到 run/patrol-last.json，且不含草稿正文', async
   assert.ok(fs.existsSync(file));
   const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.equal(saved.status, 'done');
-  assert.equal(saved.stores.length, 2);
+  assert.equal(saved.sources.length, 2);
   assert.equal(/Hello/.test(JSON.stringify(saved)), false, '摘要里不能出现草稿正文');
 });
 

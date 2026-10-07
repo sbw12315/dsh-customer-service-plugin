@@ -236,3 +236,43 @@ test('改动数据目录后热切换并新建目录骨架', async () => {
     fs.rmSync(next, { recursive: true, force: true });
   });
 });
+
+test('保存设置后运行中的 CLI 客户端立刻用新参数（不再需要重启）', async () => {
+  await withPlugin(
+    async ({ base, ctx }) => {
+      const token = (await (await fetch(`${base}/cs/`)).text()).match(/name="cs-token" content="([0-9a-f]+)"/)?.[1];
+      assert.ok(token, '入口页里应该有控制台令牌');
+      const scan = () =>
+        fetch(`${base}/cs/api/patrol/scan`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-cs-token': token },
+          body: JSON.stringify({ channels: ['lark-mail'] }),
+        });
+      const lastMailArgs = () =>
+        ctx.spawns.filter((spec) => spec.argv.includes('accessible_mailboxes')).pop()?.argv ?? [];
+
+      // 先扫一次：让 lark 客户端把定位结果（里面带着 cliArgs）缓存下来。
+      await scan();
+      const before = lastMailArgs();
+      assert.ok(before.includes('old-profile'), `首次应当用旧 profile：${before.join(' ')}`);
+      assert.ok(before.some((arg) => arg.includes('old@example.com')), '首次应当用旧邮箱');
+
+      const saved = await fetch(`${base}/cs/api/settings`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-cs-token': token },
+        body: JSON.stringify({ cliArgs: { lark: '--profile new-profile' }, mailboxes: 'new@example.com' }),
+      });
+      assert.equal(saved.status, 200);
+
+      // 再扫一次：这次必须用新参数。旧实现整体替换 runtime.settings，
+      // 客户端捕获的还是旧对象、且定位缓存从不清，所以只能靠重启才生效。
+      await scan();
+      const after = lastMailArgs();
+      assert.ok(after.includes('new-profile'), `改完设置应当立即用新 profile：${after.join(' ')}`);
+      assert.ok(after.some((arg) => arg.includes('new@example.com')), '应当用新配置的邮箱');
+      assert.ok(!after.includes('old-profile'), '不该再用旧 profile');
+      assert.ok(!after.some((arg) => arg.includes('old@example.com')), '不该再用旧邮箱');
+    },
+    { settings: { cliArgs: { lark: '--profile old-profile' }, mailboxes: 'old@example.com' } },
+  );
+});

@@ -90,14 +90,19 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 30px;
+  width: 26px;
   height: 22px;
-  padding: 0 6px;
+  padding: 0;
   border-radius: 6px;
   background: var(--cs-brand);
   color: #fff;
   font-size: 12px;
   font-weight: 600;
+}
+
+/* 品牌标是矢量耳机图标（内联在 index.html 里），跟着 .brand-mark 的 color 走。 */
+.brand-mark svg {
+  display: block;
 }
 
 .brand-title {
@@ -976,5 +981,46 @@ select {
 .banner-warn {
   border-color: var(--cs-warn);
   color: var(--cs-warn);
+}
+
+/* ── 店铺扫描 ─────────────────────────────────────────────────────────── */
+
+.sub-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sub-head h3 {
+  margin: 0;
+}
+
+.sub-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.scan-note {
+  margin: 8px 0;
+}
+
+.scan-diff {
+  padding: 6px 10px;
+  border-left: 3px solid var(--cs-brand);
+  border-radius: 4px;
+  background: var(--cs-bg-soft);
+  font-size: 12px;
+}
+
+.skip-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--cs-text-dim);
+  font-size: 12px;
+  line-height: 1.7;
 }
 

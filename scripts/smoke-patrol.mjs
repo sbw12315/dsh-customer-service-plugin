@@ -9,7 +9,8 @@
  * 它**永远不会发送任何消息**：链路上不存在发送动作（见 test/amazon.test.js 的断言）。
  *
  * 用法：
- *   node scripts/smoke-patrol.mjs --list                  # 只列店铺，不巡逻
+ *   node scripts/smoke-patrol.mjs --list                  # 只列可巡逻的亚马逊店铺
+ *   node scripts/smoke-patrol.mjs --list-all              # 全量店铺（含非亚马逊，解释为什么不被巡逻）
  *   node scripts/smoke-patrol.mjs                         # 按 settings.patrol 跑全部店铺
  *   node scripts/smoke-patrol.mjs --max-per-store=2 --max-stores=3
  *   node scripts/smoke-patrol.mjs --stores=27630232762680,27899883383180
@@ -21,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { buildSearchPath, locateCli } from '../lib/clilocator.js';
 import { createPatrolService } from '../lib/patrol.js';
-import { createAmazonAdapter } from '../lib/platforms/amazon.js';
+import { createAmazonAdapter, isAmazonStore } from '../lib/platforms/amazon.js';
 import { runCli } from '../lib/proc.js';
 import { loadSettings } from '../lib/settings.js';
 import { createDraftStore } from '../lib/store/drafts.js';
@@ -119,10 +120,17 @@ console.log(`紫鸟CLI : ${located.path}（${located.via}）`);
 console.log(`设置    : ${file}`);
 console.log(`数据目录: ${dataDir}`);
 
-if (args.list) {
-  const stores = await adapter.listStores();
-  console.log(`\n亚马逊店铺 ${stores.length} 家：`);
+if (args.list || args.listAll) {
+  // 与巡逻页的「扫描可用店铺」走同一套逻辑：全量 → 过滤出能巡逻的。
+  const all = await adapter.listAllStores();
+  const stores = all.filter(isAmazonStore);
+  console.log(`\n账号下共 ${all.length} 家店铺，其中可巡逻的亚马逊店 ${stores.length} 家：`);
   for (const store of stores) console.log(`  · ${store.storeName}  [${store.storeId}]  ${store.platformName}`);
+  if (args.listAll) {
+    const skipped = all.filter((store) => !isAmazonStore(store));
+    console.log(`\n非亚马逊店铺 ${skipped.length} 家（当前不巡逻）：`);
+    for (const store of skipped) console.log(`  · ${store.storeName}  [${store.storeId}]  ${store.platformName}`);
+  }
   process.exit(0);
 }
 

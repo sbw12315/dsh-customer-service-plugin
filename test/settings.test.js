@@ -9,6 +9,7 @@ import {
   loadSettings,
   normalizeSettings,
   parseArgs,
+  parseMailboxes,
   readJson,
   saveSettings,
   settingsDir,
@@ -46,6 +47,29 @@ test('parseArgs 同时接受数组与界面手输的字符串', () => {
   assert.deepEqual(parseArgs(''), []);
   assert.deepEqual(parseArgs(null), []);
   assert.deepEqual(parseArgs(['', '  ', '--a']), ['--a']);
+});
+
+test('parseMailboxes 接受数组与界面手输的字符串，按小写去重并丢掉非地址片段', () => {
+  assert.deepEqual(parseMailboxes(['support@fusou.vip']), ['support@fusou.vip']);
+  assert.deepEqual(parseMailboxes('support@fusou.vip, cs@jinmukeji.com'), [
+    'support@fusou.vip',
+    'cs@jinmukeji.com',
+  ]);
+  // 大小写不同的同一个地址只留一条，保留先出现的写法
+  assert.deepEqual(parseMailboxes(['Support@fusou.vip', 'support@fusou.VIP']), ['Support@fusou.vip']);
+  // 没有 @ 的片段（手输时常见）直接丢掉，不当成邮箱
+  assert.deepEqual(parseMailboxes('support@fusou.vip 随便写的 123'), ['support@fusou.vip']);
+  assert.deepEqual(parseMailboxes(''), []);
+  assert.deepEqual(parseMailboxes(null), []);
+});
+
+test('normalizeSettings 收敛 patrol 邮箱列表，默认不巡逻任何邮箱', () => {
+  assert.deepEqual(DEFAULT_SETTINGS.mailboxes, []);
+  assert.deepEqual(normalizeSettings({}).mailboxes, []);
+  assert.deepEqual(normalizeSettings({ mailboxes: 'support@fusou.vip cs@jinmukeji.com' }).mailboxes, [
+    'support@fusou.vip',
+    'cs@jinmukeji.com',
+  ]);
 });
 
 test('normalizeSettings 把 cliArgs 的字符串写法收敛成数组', () => {

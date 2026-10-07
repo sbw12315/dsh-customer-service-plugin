@@ -1,4 +1,4 @@
-# dsh-customer-service-plugin
+# <img src="assets/icon.svg" width="28" height="28" alt="" /> dsh-customer-service-plugin
 
 一个可以装进任意 DeepSeek Harness 实例的**客服插件**：在 DSH 里提供一个**纯点击操作**的中文客服控制台，不需要会 AI 也能用。
 
@@ -16,7 +16,7 @@
 
 ---
 
-## 一键巡逻（v0.3.0）
+## 一键巡逻（v0.3.0 / v0.4.0 增加飞书邮箱）
 
 控制台 → **工作台 · 巡逻** → 一个大按钮：
 
@@ -26,6 +26,7 @@
 
 ```
 store list                       → 过滤出 platformName 含「亚马逊 / Amazon」的店铺
+                                   （这一步也可以由界面上「扫描可用店铺」按钮手动触发）
   for 每家店：
     store open --id <storeId>    → 打开（已开则复用）
     page visit  收件箱 ?fi=responseNeeded
@@ -37,6 +38,55 @@ store list                       → 过滤出 platformName 含「亚马逊 / Am
       写入草稿库 drafts/drafts.json（同 caseId 去重）
       写入工单队列 queue.json（channel=amazon，状态 drafted）
 ```
+
+### 扫描可用店铺（手动）
+
+店铺列表带 **60 秒缓存**（`store list` 要一两秒，控制台刷新又很频繁），而且**在紫鸟里
+新增店铺不会通知 DSH**。所以「可巡逻的店铺」那一栏右侧有一个 **扫描可用店铺** 按钮：
+
+- 点它 → `POST /cs/api/patrol/scan` → 强制跳过缓存重跑 `store list`；
+- 回来后直接告诉你**变了什么**：「共 71 家店铺，其中亚马逊 8 家；新增：Amazon-XXX」，
+  新店铺自动勾上、消失的自动从勾选里去掉，列表里新店会带一个「新」徽标；
+- 账号下的非亚马逊店铺（实机上是 71 − 8 = 63 家）折叠在「另有 N 家非亚马逊店铺」里，
+  带着平台名和原因 —— 这样「某家店为什么没被巡逻」有一句明确答案，而不是让人怀疑漏扫。
+
+两个刻意的行为：
+
+1. **扫描失败不清空列表**：紫鸟偶发未登录/连不上时，保留上一次成功的结果并附上错误，
+   否则你分不清「真的没有店铺」和「这次没读到」。
+2. **首次扫描不报「新增」**：没有基准就没有差异，报出来只会是假信号。
+
+### 第二个渠道：飞书邮箱（v0.4.0）
+
+亚马逊那条线看的是店铺站内信；平台通知、供应商、物流、货代的往来全在**邮箱**里 ——
+那才是「漏回一封就出事」的地方。所以巡逻现在有两个渠道，界面上分块列出、各自勾选：
+
+| | 亚马逊店铺 | 飞书邮箱 |
+|---|---|---|
+| 目标来源 | `ziniao store list` | `设置 → 巡逻邮箱` 里配置的地址，逐个过 `mail user_mailboxes accessible_mailboxes` 确认 |
+| 待回复判定 | 收件箱 `fi=responseNeeded` | 收件箱会话的**最后一封是来信**（我方已回 / 已有草稿就不打扰） |
+| 读取方式 | 打开浏览器逐条点会话 | 纯 API：会话列表 → 逐条 `+thread --html=false` |
+| 草稿去向 | 插件草稿库 | 插件草稿库；可再点「创建飞书回复草稿」写进飞书草稿箱 |
+
+**身份走机器人（bot）**：邮件链路全部用 `--as bot`（租户 token），**不需要**个人
+`auth login`，也就没有「授权过期」这回事。相应地有两条硬前提：
+
+- 机器人要有邮箱权限（应用层的 mail scope），这由飞书开发者后台决定；
+- **邮箱地址必须显式配置**：bot 用的是租户 token，邮箱接口不接受 `me`
+  （实测报 `tenant access token not support me`），没法「列出全部可访问邮箱」。
+  在「设置 → 巡逻邮箱」里用空格或逗号填地址，例如 `support@fusou.vip`。
+  地址写错、或机器人看不到该邮箱时，扫描阶段就明确报错，不会静默少扫；
+  一个地址都没配时，该渠道提示「还没有配置巡逻邮箱」，不做任何猜测。
+
+**安全默认值**：
+
+- 默认**不往飞书草稿箱写**。草稿只进插件草稿库，要落到飞书得人点一次，或显式勾上
+  「同时把邮件草稿写进飞书草稿箱」。无论哪种，都只是存草稿，**永远不会发送**。
+
+邮件模板与买家消息模板**刻意不同**：买家消息是自家店铺的售后，可以直接承诺「给你补件」；
+公共邮箱里坐着的是平台、供应商、货代、甚至催款 —— 一封替人承诺的草稿发出去就是钱。
+所以邮件模板一律**只承接、不断言**（已收到 / 正在核实 / 下一封给结论），并且会把飞书返回的
+`security_level` 风险标记写进草稿备注：邮件是外部不可信输入，不能因为它这么说就照着做。
 
 设计取舍：
 
@@ -196,10 +246,12 @@ settings.json :  $DSH_CS_DIR                       （若设置）
 | GET | `/cs/api/patrol` | 巡逻状态：进行中/最近一次、每店明细、进度、账号下的 Amazon 店铺 |
 | POST | `/cs/api/patrol` | **一键巡逻**入口（202 立即返回，后台继续跑） |
 | POST | `/cs/api/patrol/stop` | 请求停止：跑完当前这家店就收工 |
-| GET | `/cs/api/patrol/stores` | 只列 Amazon 店铺（带 60 秒缓存） |
+| GET | `/cs/api/patrol/stores` | 店铺扫描结果（带 60 秒缓存，`?refresh=1` 强刷） |
+| POST | `/cs/api/patrol/scan` | **手动扫描可用目标**：跳过缓存重跑，返回每个渠道的新增/移除差异（`{channels:[...]}` 可只扫指定渠道） |
 | GET | `/cs/api/drafts` | 草稿列表（按店铺/意图/状态/需人工/关键字筛，自动按紧急度排序） |
 | GET/PATCH | `/cs/api/drafts/:id` | 单条草稿详情 / 改正文、改状态（带 `rev` 乐观锁） |
-| POST | `/cs/api/drafts/:id/fill` | **人工触发**：把草稿文本填进亚马逊回复框（不发送） |
+| POST | `/cs/api/drafts/:id/fill` | **人工触发**：把草稿文本填进亚马逊回复框（不发送，仅亚马逊草稿） |
+| POST | `/cs/api/drafts/:id/mail-draft` | **人工触发**：在飞书里建一封回复草稿（不发送，仅飞书邮件草稿） |
 
 写操作一律校验 `x-cs-token`；状态跃迁非法返回 400 并带上允许的下一状态，乐观锁冲突返回 409。
 
@@ -254,7 +306,8 @@ test/                 node:test，零外部依赖
 cd packages/dsh-customer-service-plugin
 npm test                          # node --test，192 项，零依赖
 node scripts/smoke-cli.mjs        # 不依赖 DSH，直接打真实 CLI，验证定位/调用/解析链路
-node scripts/smoke-patrol.mjs --list          # 只列账号下的 Amazon 店铺
+node scripts/smoke-patrol.mjs --list          # 列账号下可巡逻的 Amazon 店铺
+node scripts/smoke-patrol.mjs --list-all      # 全量店铺（含非亚马逊，说明为什么不被巡逻）
 node scripts/smoke-patrol.mjs --max-per-store=2   # 真的跑一遍一键巡逻并落草稿
 npm pack                          # 产出可分发到其它 DSH 的 tarball
 ```
@@ -349,6 +402,16 @@ Host 半就是 `lib/index.js`，Client 半就是手写的 `lib/client.js`
   （实跑时 8 家店里有 1 家就是这个状态。）
 - 草稿模板是英文的；非英语买家会在草稿备注里提示，需要人工按买家语言调整。
 - `lib/*.js`（宿主半）改动**必须重启 DSH** 才生效，`assets/` 刷新页面即可。
+- `lib/client.js`（浏览器半边）由 DSH 的客户端插件通道加载，不在 `assets/` 里，
+  属于「改了要重载」的那一类。
+
+### 客户端半边必须声明 `inject: ['slots']`（v0.3.1 修复）
+
+早期版本写成 `inject = []` + `ctx.get('slots')`，后果是**侧边栏底部没有「客服」按钮，
+而且不留任何痕迹**：浏览器端上下文里服务挂在 `ctx.slots` 上（DSH 自身有 92 处
+`inject: ['slots']`），`ctx.get('slots')` 拿不到 → 旧代码「静默 return」→ 什么都不注册。
+现在改成 `inject = ['slots']` + `ctx.slots`（保留 `ctx.get` 作兼容回退），并且拿不到时
+会往控制台打一行明确错误 —— 这类失败最贵的不是修，而是它不说话。
 
 ## License
 

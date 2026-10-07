@@ -126,8 +126,11 @@ try {
 }
 try {
   const parsed = JSON.parse(patrol.text);
-  patrolOk = typeof parsed.data?.running === 'boolean' && Array.isArray(parsed.data?.stores?.items);
-  patrolStores = parsed.data?.stores?.items?.length ?? null;
+  patrolOk =
+    typeof parsed.data?.running === 'boolean' &&
+    Array.isArray(parsed.data?.channels) &&
+    Boolean(parsed.data?.sources?.amazon);
+  patrolStores = parsed.data?.sources?.amazon?.items?.length ?? null;
 } catch {
   patrolOk = false;
 }
@@ -142,6 +145,11 @@ line(metaOk, 'GET /api/meta 可用（含草稿与巡逻维度）', metaOk ? '' :
 line(statsOk, 'GET /api/stats 可用');
 line(queueOk, 'GET /api/queue 可用', queueOk ? `现有 ${queueTotal} 条工单` : '');
 line(patrolOk, 'GET /api/patrol 可用（一键巡逻）', patrolOk ? `识别到 ${patrolStores} 家亚马逊店铺` : '重启 DSH 后可用');
+line(
+  Boolean(meta.text) && Boolean(JSON.parse(meta.text).data?.patrol?.channels?.length),
+  '巡逻渠道已注册',
+  meta.text ? (JSON.parse(meta.text).data?.patrol?.channels ?? []).join('、') || '—' : '—',
+);
 line(draftsOk, 'GET /api/drafts 可用（草稿库）', draftsOk ? `现有 ${draftsTotal} 条草稿` : '重启 DSH 后可用');
 
 console.log('');
