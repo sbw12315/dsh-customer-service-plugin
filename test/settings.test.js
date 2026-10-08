@@ -63,6 +63,14 @@ test('parseMailboxes 接受数组与界面手输的字符串，按小写去重�
   assert.deepEqual(parseMailboxes(null), []);
 });
 
+test('飞书邮箱渠道默认关闭，只有显式打开才启用', () => {
+  assert.equal(DEFAULT_SETTINGS.mailEnabled, false);
+  assert.equal(normalizeSettings({}).mailEnabled, false, '没写这个字段 = 关闭');
+  assert.equal(normalizeSettings({ mailboxes: 'support@fusou.vip' }).mailEnabled, false, '配了邮箱也仍然是关的');
+  assert.equal(normalizeSettings({ mailEnabled: true }).mailEnabled, true);
+  assert.equal(normalizeSettings({ mailEnabled: false }).mailEnabled, false);
+});
+
 test('normalizeSettings 收敛 patrol 邮箱列表，默认不巡逻任何邮箱', () => {
   assert.deepEqual(DEFAULT_SETTINGS.mailboxes, []);
   assert.deepEqual(normalizeSettings({}).mailboxes, []);

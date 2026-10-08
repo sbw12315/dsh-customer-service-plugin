@@ -1,6 +1,6 @@
 {
   "name": "dsh-customer-service-plugin",
-  "version": "0.4.0",
+  "version": "0.4.2",
   "description": "客服插件：DSH 里的点击式客服控制台。一键巡逻全部 Amazon 店铺的买家消息并批量生成草稿，计划/话术模板/排班/队列，通过紫鸟CLI 操作 TikTok Shop / Walmart / Amazon 店铺、通过飞书CLI 回复客服邮件；草稿先行，人工点发送。",
   "type": "module",
   "main": "lib/index.js",

@@ -88,6 +88,26 @@ test('listSources：按配置的邮箱逐个确认，全部走 bot 身份', asyn
   }
 });
 
+test('enabled()：默认关闭，只有 settings.mailEnabled 为 true 才算启用', () => {
+  const lark = fakeLark({ user_mailboxes: mailboxQuery });
+  // 没给 settings = 出厂默认 = 关
+  assert.equal(createLarkMailAdapter({ lark }).enabled(), false);
+  assert.equal(
+    createLarkMailAdapter({ lark, settings: { mailboxes: DEFAULT_MAILBOXES } }).enabled(),
+    false,
+    '只配了邮箱不算启用',
+  );
+  assert.equal(createLarkMailAdapter({ lark, settings: { mailEnabled: false } }).enabled(), false);
+  assert.equal(createLarkMailAdapter({ lark, settings: { mailEnabled: true } }).enabled(), true);
+
+  // 开关每次现读：设置改完不必重启（这条同时锁住「捕获的是对象而不是快照」）。
+  const settings = { mailEnabled: false };
+  const adapter = createLarkMailAdapter({ lark, settings });
+  assert.equal(adapter.enabled(), false);
+  settings.mailEnabled = true;
+  assert.equal(adapter.enabled(), true);
+});
+
 test('listSources：没配置邮箱时给出可照做的提示，且不白调 CLI', async () => {
   const lark = fakeLark({ user_mailboxes: mailboxQuery });
   const adapter = createLarkMailAdapter({ lark, settings: { mailboxes: [] } });

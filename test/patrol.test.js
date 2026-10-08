@@ -149,6 +149,7 @@ test('normalizePatrolOptions：收敛数值、渠道与目标 id', () => {
     closeAfter: false,
     channels: [],
     writeMailDrafts: false,
+    autoFillAmazon: false,
     sourceIds: ['a', 'b'],
   });
   // 旧前端字段名 storeIds 仍然认。
@@ -275,6 +276,73 @@ test('没有店铺时立刻正常结束，不算失败', async () => {
   const run = service.snapshot().run;
   assert.equal(run.status, 'done');
   assert.equal(run.progress.sourcesTotal, 0);
+});
+
+test('人工改过的草稿：巡逻重新生成时不覆盖正文，单独计数', async () => {
+  const adapter = fakeAdapter();
+  const { service, drafts } = makeService(adapter);
+
+  service.start({});
+  await waitFor(() => service.snapshot().run.status !== 'running');
+  const first = drafts.list({}).items.find((item) => item.buyer === 'cain');
+  drafts.patch(first.id, { body: '人手改过的正文' });
+
+  service.start({});
+  await waitFor(() => service.snapshot().run.status !== 'running');
+  const run = service.snapshot().run;
+  // 只有被人工改过的那一条受保护；另两条没人动过，照常刷新。
+  assert.equal(run.progress.draftsPreserved, 1);
+  assert.equal(run.progress.draftsUpdated, 2);
+  assert.equal(drafts.get(first.id).body, '人手改过的正文');
+});
+
+test('autoFillAmazon：只填不发送，并把草稿标成已填入', async () => {
+  const adapter = fakeAdapter();
+  adapter.fillOpenConversation = async (store, text) => {
+    adapter.calls.push(['fillOpenConversation', store.storeId, text.slice(0, 20)]);
+    return { filled: true, length: text.length };
+  };
+  const { service, drafts } = makeService(adapter);
+
+  // 明确关掉时不填。
+  service.start({ autoFillAmazon: false });
+  await waitFor(() => service.snapshot().run.status !== 'running');
+  assert.equal(adapter.calls.filter((call) => call[0] === 'fillOpenConversation').length, 0);
+  assert.equal(service.snapshot().run.progress.autoFilled, 0);
+  assert.equal(drafts.list({}).items.every((item) => item.status === 'draft'), true, '关掉时不该改动状态');
+
+  // 打开后每条都填。
+  service.start({ autoFillAmazon: true });
+  await waitFor(() => service.snapshot().run.status !== 'running');
+  const run = service.snapshot().run;
+  assert.equal(run.progress.autoFilled, 3);
+  const filled = adapter.calls.filter((call) => call[0] === 'fillOpenConversation');
+  assert.equal(filled.length, 3);
+  // 只填草稿正文，链路里没有任何发送动作。
+  assert.equal(/send|发送/i.test(JSON.stringify(adapter.calls)), false);
+  assert.equal(drafts.list({ status: 'filled' }).total, 3, '填过的草稿状态应为 filled');
+});
+
+test('autoFillAmazon：填入的是库里的正文，不是刚生成的这一份', async () => {
+  const adapter = fakeAdapter();
+  const filledTexts = [];
+  adapter.fillOpenConversation = async (store, text) => {
+    filledTexts.push(text);
+    return { filled: true, length: text.length };
+  };
+  const { service, drafts } = makeService(adapter);
+
+  service.start({ autoFillAmazon: true });
+  await waitFor(() => service.snapshot().run.status !== 'running');
+
+  // 人工改一条，再跑一次：库里保留了人工版，浏览器里也必须填人工版。
+  const cain = drafts.list({}).items.find((item) => item.buyer === 'cain');
+  drafts.patch(cain.id, { body: '人手改过的正文' });
+  filledTexts.length = 0;
+
+  service.start({ autoFillAmazon: true });
+  await waitFor(() => service.snapshot().run.status !== 'running');
+  assert.ok(filledTexts.includes('人手改过的正文'), '填入的应是库里保留的人工版本');
 });
 
 test('同时只能跑一次巡逻', async () => {

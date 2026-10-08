@@ -23,7 +23,8 @@ const state = {
   meta: null,
   patrol: null,
   drafts: null,
-  filters: { status: 'all', intent: '', storeId: '', needsHuman: false, q: '' },
+  // platform 留空 = 全部渠道；storeId 留空 = 全部店铺/邮箱。
+  filters: { status: 'all', platform: '', intent: '', storeId: '', needsHuman: false, q: '' },
   options: { maxStores: 0, maxPerStore: 3, headless: false, closeAfter: false },
   selectedStores: null,
   scanning: false,
@@ -61,7 +62,10 @@ async function refreshDrafts() {
 /** 整体刷新。 */
 async function refresh() {
   await loadMeta();
-  await Promise.all([refreshPatrol(), refreshDrafts()]);
+  // 先巡逻再草稿：草稿筛选的下拉要用到渠道表（渠道名）与扫描结果。
+  // 之前两个并发跑，草稿先渲染时渠道还没到，下拉就是空的。
+  await refreshPatrol();
+  await refreshDrafts();
 }
 
 /* ── 一键巡逻 ─────────────────────────────────────────────────────────── */
@@ -161,6 +165,12 @@ function optionRow() {
     ]),
     node('div', { class: 'field-row patrol-options' }, [
       checkbox('同时把邮件草稿写进飞书草稿箱', 'writeMailDrafts', '仍然只存草稿、不发送；相当于替你在飞书里点一遍「存草稿」'),
+      checkbox(
+        '生成草稿后自动填入亚马逊回复框',
+        'autoFillAmazon',
+        '只影响亚马逊：草稿生成后直接填进已经打开的那条会话的回复框，**不会发送**。'
+          + '代价是跑一遍 8 家店会在浏览器里留下十几到几十个未发送的输入框。',
+      ),
     ]),
   ]);
 }
@@ -204,13 +214,15 @@ function renderOneClick() {
   );
   container.appendChild(optionRow());
 
-  const error = state.patrol?.stores?.error;
-  if (error) {
+  // 逐个渠道报扫描失败：渠道少，报清楚比汇总成一句有用。
+  for (const channel of state.patrol?.channels ?? []) {
+    const error = state.patrol?.sources?.[channel.id]?.error;
+    if (!error) continue;
     container.appendChild(
       node('div', { class: 'banner banner-error' }, [
-        node('strong', { text: '取店铺列表失败：' }),
+        node('strong', { text: `${channel.label} 读取失败：` }),
         node('span', { text: error.message }),
-        error.hint ? node('span', { class: 'muted', text: ` ${error.hint}` }) : null,
+        error.hint ? node('div', { class: 'muted', text: error.hint }) : null,
       ]),
     );
   }
@@ -308,10 +320,11 @@ function renderSources() {
   }
 
   // 第一次拿到列表时定下默认勾选。飞书邮箱只默认勾公共邮箱 ——
-  // 顺手把个人收件箱也巡逻了，多半不是想要的。
+  // 顺手把个人收件箱也巡逻了，多半不是想要的；没启用的渠道更是整块跳过。
   if (state.selectedStores === null) {
     const defaults = new Set();
     for (const channel of channels) {
+      if (channel.enabled === false) continue;
       for (const source of scans[channel.id]?.items ?? []) {
         if (channel.id === 'lark-mail' && source.isShared === false) continue;
         defaults.add(source.storeId);
@@ -327,7 +340,9 @@ function renderSources() {
 
     block.appendChild(
       node('div', { class: 'sub-head' }, [
-        node('h3', { text: `${channel.label}（${list.length}）` }),
+        node('h3', {
+          text: channel.enabled === false ? `${channel.label}（未启用）` : `${channel.label}（${list.length}）`,
+        }),
         node('div', { class: 'sub-actions' }, [
           node('span', { class: 'muted', text: scan.checkedAt ? `上次扫描 ${dateTime(scan.checkedAt)}` : '尚未扫描' }),
           node('button', {
@@ -348,7 +363,13 @@ function renderSources() {
       block.appendChild(
         node('div', {
           class: 'muted',
-          text: scan.error ? '看不到列表（原因见上）。' : `没有扫描到可巡逻的${channel.kind === 'mailbox' ? '邮箱' : '店铺'}。`,
+          // 未启用不是错误，也不是「没有目标」：把原因和怎么打开直接写在这一行。
+          text:
+            channel.enabled === false
+              ? scan.hint ?? `该渠道未启用：先在「设置」里接好 CLI，再手动打开。`
+              : scan.error
+                ? '看不到列表（原因见上）。'
+                : `没有扫描到可巡逻的${channel.kind === 'mailbox' ? '邮箱' : '店铺'}。`,
         }),
       );
     } else {
@@ -423,6 +444,10 @@ function renderProgress() {
         node('td', {}, [badge(store.status, STORE_TONE[store.status] ?? 'idle')]),
         node('td', { text: String(store.conversations ?? 0) }),
         node('td', { text: String(store.drafts ?? 0) }),
+        // 跳过的自动通知/系统群发：不静默丢掉，运营要能看出「不是漏扫」。
+        node('td', {}, store.skipped
+          ? [node('span', { class: 'muted', text: String(store.skipped), title: (store.skipSamples ?? []).map((s) => `${s.subject}：${s.reason}`).join('\n') })]
+          : [node('span', { class: 'muted', text: DASH })]),
         node('td', { class: 'muted', text: store.durationMs ? `${Math.round(store.durationMs / 1000)}s` : DASH }),
         node('td', { class: store.error ? 'cell-overdue' : 'muted', text: store.error ?? DASH }),
       ]),
@@ -434,8 +459,9 @@ function renderProgress() {
             node('th', { text: '渠道' }),
             node('th', { text: '目标' }),
             node('th', { text: '结果' }),
-            node('th', { text: '会话' }),
+            node('th', { text: '待回复' }),
             node('th', { text: '草稿' }),
+            node('th', { text: '已跳过' }),
             node('th', { text: '耗时' }),
             node('th', { text: '错误' }),
           ]),
@@ -473,10 +499,67 @@ function kpi(label, value, tone = 'idle') {
 
 /* ── 草稿 ─────────────────────────────────────────────────────────────── */
 
+/** 渠道展示名：优先用巡逻页已注册的渠道表。 */
+function channelLabel(channelId) {
+  return (state.patrol?.channels ?? []).find((channel) => channel.id === channelId)?.label ?? channelId;
+}
+
+/**
+ * 按渠道分组的店铺/邮箱下拉。
+ *
+ * 选项来自草稿接口的 `facets`（基于**全部**草稿算），而不是当前这一页 —— 否则一按店铺
+ * 筛完，下拉里就只剩那一个，等于换不了。
+ * @param {string} value - 当前选中值。
+ * @param {Function} onchange - 变更回调。
+ * @returns {HTMLElement} select 元素。
+ */
+function draftFacets() {
+  const facets = state.drafts?.facets?.stores;
+  if (Array.isArray(facets)) return facets;
+  // 宿主半还是旧版时没有 facets：退化到从当前这页推。缺点是筛完选项会跟着变少，
+  // 但那也比「下拉里什么都没有」强 —— 重启 DSH 后自动用回服务端的完整清单。
+  const map = new Map();
+  for (const item of state.drafts?.items ?? []) {
+    if (!item.storeId) continue;
+    const key = `${item.platform}::${item.storeId}`;
+    const found = map.get(key);
+    if (found) found.total += 1;
+    else map.set(key, { platform: item.platform, storeId: item.storeId, storeName: item.storeName || item.storeId, total: 1 });
+  }
+  return [...map.values()].sort((a, b) => a.storeName.localeCompare(b.storeName));
+}
+
+function storeSelect(value, onchange) {
+  const facets = draftFacets();
+  const el = node('select', { onchange: (event) => onchange(event.target.value) });
+  el.appendChild(node('option', { value: '', text: '全部店铺 / 邮箱' }));
+  const groups = new Map();
+  for (const facet of facets) {
+    if (!groups.has(facet.platform)) groups.set(facet.platform, []);
+    groups.get(facet.platform).push(facet);
+  }
+  for (const [platform, list] of groups) {
+    const group = node('optgroup', { label: `${channelLabel(platform)}（${list.length}）` });
+    for (const facet of list) {
+      group.appendChild(
+        node('option', {
+          value: facet.storeId,
+          text: `${facet.storeName}（${facet.total}）`,
+          selected: facet.storeId === value,
+        }),
+      );
+    }
+    el.appendChild(group);
+  }
+  el.value = value ?? '';
+  return el;
+}
+
 function draftFilters() {
   const intents = state.meta?.drafts?.intents ?? [];
   const statuses = state.meta?.drafts?.statuses ?? [];
-  const stores = state.patrol?.stores?.items ?? [];
+  // 渠道选项同样来自 facets（只看「确实有草稿的渠道」），避免选了空渠道一片空白。
+  const platforms = [...new Set(draftFacets().map((facet) => facet.platform))];
   const set = (key) => (value) => {
     state.filters[key] = value;
     refreshDrafts().catch((cause) => toast(cause.message, 'error'));
@@ -501,10 +584,11 @@ function draftFilters() {
       set('intent'),
     ),
     select(
-      [{ value: '', label: '全部店铺' }, ...stores.map((store) => ({ value: store.storeId, label: store.storeName }))],
-      state.filters.storeId,
-      set('storeId'),
+      [{ value: '', label: '全部渠道' }, ...platforms.map((id) => ({ value: id, label: channelLabel(id) }))],
+      state.filters.platform,
+      set('platform'),
     ),
+    storeSelect(state.filters.storeId, set('storeId')),
     node('label', { class: 'toggle' }, [
       node('input', {
         type: 'checkbox',

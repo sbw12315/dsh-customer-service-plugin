@@ -122,6 +122,29 @@ function problemsOf(health) {
   return problems;
 }
 
+/**
+ * 飞书CLI 的当前状态（接没接上）。
+ *
+ * 「先手动接好飞书CLI，再手动开启邮箱渠道」里的第一步就靠这一行确认：
+ * 找到路径 + 能跑出版本号才算接上，附加参数（profile）也会一并回显。
+ * @returns {object} DOM 节点。
+ */
+function larkStatusNode() {
+  const info = state.health?.clis?.lark;
+  if (!info) return node('span', { class: 'muted', text: '未知（先体检一次）' });
+  const args = (info.args ?? []).join(' ');
+  if (!info.found) {
+    return node('span', { class: 'muted', text: `未找到 lark-cli —— 先安装：${info.install ?? 'npm install -g @larksuite/cli'}` });
+  }
+  if (info.error) {
+    return node('span', { class: 'muted', text: `已找到但不可用：${info.error.message}` });
+  }
+  return node('span', {
+    class: 'muted',
+    text: `${info.path ?? 'lark-cli'}${args ? `（附加参数 ${args}）` : ''} · ${info.version ?? '版本未知'}`,
+  });
+}
+
 /** 表单区域。 */
 function settingsForm() {
   const s = state.settings.settings;
@@ -163,6 +186,21 @@ function settingsForm() {
         ),
       ]),
       node('div', { class: 'field-row' }, [
+        field(
+          '启用飞书邮箱渠道',
+          node('span', { class: 'field-inline' }, [
+            node('input', {
+              type: 'checkbox',
+              id: 'mail-enabled',
+              checked: s.mailEnabled === true,
+            }),
+            node('span', { class: 'field-inline-note', text: s.mailEnabled === true ? '已启用' : '默认关闭' }),
+          ]),
+          '邮箱是「别人的地盘」，所以默认关着。要打开请先按下面那行确认飞书CLI 已接好，再勾上这里并保存。',
+        ),
+        field('飞书CLI 当前状态', larkStatusNode(), null),
+      ]),
+      node('div', { class: 'field-row' }, [
         field('数据目录', textInput('data-dir', s.dataDir, '留空使用默认目录'), '计划、队列、草稿、审计都放这里'),
         field(
           'SLA 默认时长（小时）',
@@ -190,6 +228,7 @@ async function save(stateLabel) {
       cliPaths: { ziniao: valueOf('cli-ziniao').trim(), lark: valueOf('cli-lark').trim() },
       cliArgs: { ziniao: valueOf('cli-args-ziniao'), lark: valueOf('cli-args-lark') },
       mailboxes: valueOf('mailboxes'),
+      mailEnabled: document.getElementById('mail-enabled')?.checked === true,
       dataDir: valueOf('data-dir').trim(),
       sla: { defaultHours: valueOf('sla-hours') },
       retention: { auditDays: valueOf('audit-days') },

@@ -273,6 +273,41 @@ test('保存设置后运行中的 CLI 客户端立刻用新参数（不再需要
       assert.ok(!after.includes('old-profile'), '不该再用旧 profile');
       assert.ok(!after.some((arg) => arg.includes('old@example.com')), '不该再用旧邮箱');
     },
-    { settings: { cliArgs: { lark: '--profile old-profile' }, mailboxes: 'old@example.com' } },
+    {
+      // 飞书邮箱默认关闭：这条测的是「设置改完立刻生效」，所以先把渠道打开。
+      settings: { cliArgs: { lark: '--profile old-profile' }, mailboxes: 'old@example.com', mailEnabled: true },
+    },
+  );
+});
+
+test('飞书邮箱渠道默认关闭：扫描只回报未启用，且一次 CLI 都不调', async () => {
+  await withPlugin(
+    async ({ base, ctx }) => {
+      const token = (await (await fetch(`${base}/cs/`)).text()).match(/name="cs-token" content="([0-9a-f]+)"/)?.[1];
+      const scan = await (
+        await fetch(`${base}/cs/api/patrol/scan`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-cs-token': token },
+          body: JSON.stringify({ channels: ['lark-mail'] }),
+        })
+      ).json();
+
+      const mail = scan.data['lark-mail'];
+      assert.equal(mail.disabled, true, '默认应当回报未启用');
+      assert.equal(mail.error, null, '未启用不是错误');
+      assert.match(mail.hint, /设置/);
+      assert.deepEqual(mail.items, []);
+
+      // 渠道列表也要带上开关状态，界面才知道该画成「未启用」。
+      const patrol = await (await fetch(`${base}/cs/api/patrol`)).json();
+      const channel = patrol.data.channels.find((entry) => entry.id === 'lark-mail');
+      assert.equal(channel.enabled, false);
+      assert.equal(patrol.data.channels.find((entry) => entry.id === 'amazon').enabled, true, '亚马逊渠道不受影响');
+
+      // 关着的渠道不该产生任何 CLI 调用。
+      const mailCalls = ctx.spawns.filter((spec) => spec.argv.includes('accessible_mailboxes'));
+      assert.deepEqual(mailCalls, []);
+    },
+    { settings: { mailboxes: 'support@example.com' } },
   );
 });

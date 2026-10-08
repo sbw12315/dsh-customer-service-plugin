@@ -124,6 +124,25 @@ test('list：按店铺/意图/状态/需人工/关键字筛选，并按到期紧
   assert.deepEqual(store.list({}).items.map((item) => item.buyer), ['cain', 'jen', 'sharon']);
 });
 
+test('facets：给出可筛选的店铺/邮箱清单，且**不受当前筛选影响**', () => {
+  const { store } = makeStore();
+  store.upsert(sample({ caseId: 'a', storeId: 'st1', storeName: 'Amazon-Cozynome-管理员' }));
+  store.upsert(sample({ caseId: 'b', storeId: 'st1', storeName: 'Amazon-Cozynome-管理员' }));
+  store.upsert(sample({ caseId: 'c', platform: 'lark-mail', storeId: 'support@fusou.vip', storeName: 'support@fusou.vip' }));
+
+  const all = store.list({});
+  assert.deepEqual(
+    all.facets.stores.map((facet) => `${facet.platform}/${facet.storeId}:${facet.total}`),
+    ['amazon/st1:2', 'lark-mail/support@fusou.vip:1'],
+  );
+
+  // 关键：按店铺筛完之后，下拉里的选项不能跟着缩水，否则等于换不了店铺。
+  const filtered = store.list({ storeId: 'st1' });
+  assert.equal(filtered.total, 2);
+  assert.equal(filtered.facets.stores.length, 2, '筛选后选项仍是全集');
+  assert.equal(filtered.facets.stores.find((facet) => facet.storeId === 'support@fusou.vip').total, 1);
+});
+
 test('counts：给出状态、意图、店铺分布与需人工数', () => {
   const { store } = makeStore();
   store.upsert(sample({ caseId: 'a' }));
@@ -134,6 +153,34 @@ test('counts：给出状态、意图、店铺分布与需人工数', () => {
   assert.equal(counts.byIntent.replacement, 2);
   assert.equal(counts.byStore['Amazon-Cozynome-管理员'], 2);
   assert.equal(counts.needsHuman, 1);
+});
+
+test('upsert：人工改过/批过/填过的草稿，巡逻重新生成时不覆盖正文', () => {
+  const { store } = makeStore();
+  const first = store.upsert(sample({ body: '机器生成的初稿' }));
+
+  // 人改过正文
+  store.patch(first.item.id, { body: '人手改过的正文' });
+  const rerun = store.upsert(sample({ body: '巡逻又生成了一版' }));
+  assert.equal(rerun.created, false);
+  assert.equal(rerun.preserved, true);
+  assert.equal(store.get(first.item.id).body, '人手改过的正文', '不能把人工修改冲掉');
+  assert.match(store.get(first.item.id).timeline.at(-1).detail, /保留人工版本/);
+
+  // 只是被巡逻重新生成过（没人动过）的，仍然允许刷新正文
+  const second = store.upsert(sample({ caseId: 'case-2', body: 'v1' }));
+  store.upsert(sample({ caseId: 'case-2', body: 'v2' }));
+  assert.equal(store.get(second.item.id).body, 'v2');
+});
+
+test('upsert：标记为已批准/已填入的草稿同样受保护', () => {
+  const { store } = makeStore();
+  const { item } = store.upsert(sample({ body: '初稿' }));
+  store.patch(item.id, { status: 'approved' });
+  const rerun = store.upsert(sample({ body: '新一版' }));
+  assert.equal(rerun.preserved, true);
+  assert.equal(store.get(item.id).body, '初稿');
+  assert.equal(store.get(item.id).status, 'approved');
 });
 
 test('patch：改正文/状态，状态白名单外直接报错', () => {
