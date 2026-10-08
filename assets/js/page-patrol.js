@@ -2,14 +2,16 @@
  * 工作台 · 巡逻页：一键把全部亚马逊店铺的客服页面过一遍并生成草稿。
  *
  * 这一页就是「一键点按模式」的落点：
- *   1. 顶部一个大按钮 —— 巡逻全部 Amazon 店铺 → 生成草稿；
+ *   1. 顶部一个大按钮 —— 巡逻全部 Amazon 店铺 → 生成草稿，并默认直接填进浏览器回复框；
  *   2. 跑的过程中每 3 秒拉一次 /api/patrol，画进度与每店结果；
- *   3. 下面是草稿库，按店铺/意图/状态筛，点开看正文、复制、或**手动**填进回复框。
+ *   3. 下面是草稿库，按店铺/意图/状态筛，点开看正文、复制、或再手动填一次回复框。
+ *   4. 每个渠道右边还有「重新扫描」—— 只巡逻这一个渠道。它跑完**不关闭浏览器**：
+ *      草稿正躺在回复框里，就是要留在那儿给工作人员核对。
  *
  * 页面上没有任何「发送」按钮 —— 这是插件的硬约束，不是遗漏。
  */
 
-import { get, patch, post, toQuery } from './api.js';
+import { del, get, patch, post, toQuery } from './api.js';
 import { badge, button, clear, copy, input, node, panel, select, toast } from './dom.js';
 import { DASH, dateTime, num } from './format.js';
 
@@ -25,12 +27,64 @@ const state = {
   drafts: null,
   // platform 留空 = 全部渠道；storeId 留空 = 全部店铺/邮箱。
   filters: { status: 'all', platform: '', intent: '', storeId: '', needsHuman: false, q: '' },
-  options: { maxStores: 0, maxPerStore: 3, headless: false, closeAfter: false },
+  options: { maxStores: 0, maxPerStore: 50, closeAfter: false },
   selectedStores: null,
+  // 定时巡检：页面上的「本地草稿」，从 /patrol 的 autoPatrol 初始化一次，点保存才回写。
+  // 刻意不在每次自动刷新时覆盖 —— 外壳每 60 秒刷一次，覆盖会把没保存的编辑冲掉。
+  autoTimes: null,
+  autoEnabled: false,
   scanning: false,
   timer: null,
   drawer: null,
 };
+
+/* ── 「本次巡逻新增」的标记色 ─────────────────────────────────────────── */
+
+/**
+ * 一次巡逻新出的草稿用**同一种**颜色标出来，下一次巡逻换一种 —— 既能把新老草稿一眼
+ * 分开，连着跑两次也能靠颜色认出哪批是哪批。
+ *
+ * 颜色只由 run id 决定（不是随机，也不是「现在排第几个」），所以刷新多少次、换不换
+ * 筛选条件，同一批草稿的颜色都不会跳。
+ */
+const NEW_RUN_COLORS = 6;
+
+/** run id → 稳定的调色板下标。 */
+function newRunColor(runId) {
+  const text = String(runId ?? '');
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) % 1000003;
+  }
+  return hash % NEW_RUN_COLORS;
+}
+
+/**
+ * 最近一次巡逻 —— 判断「哪批草稿是这次新生成的」全靠它。
+ *
+ * 服务端内存里没有 run（刚重启过 DSH）时会从 run/patrol-last.json 兜底，
+ * 所以高亮不会因为一次重启就消失。
+ * @returns {{id: string, color: number, created: number, finishedAt: string|null}|null} 信息。
+ */
+function lastRunInfo() {
+  const run = state.patrol?.lastRun;
+  if (!run || !run.id) return null;
+  return {
+    id: run.id,
+    color: newRunColor(run.id),
+    created: Number.isFinite(run.draftsCreated) ? run.draftsCreated : 0,
+    finishedAt: typeof run.finishedAt === 'string' && run.finishedAt ? run.finishedAt : null,
+  };
+}
+
+/** 图例：说明彩色行是什么意思。 */
+function newRunLegend(recent) {
+  const when = recent.finishedAt ? `（${dateTime(recent.finishedAt)}）` : '';
+  return node('div', { class: `legend-new legend-new-${recent.color}` }, [
+    node('i', {}),
+    node('span', { text: `最近一次巡逻新增 ${num(recent.created)} 条${when}，就是这一行颜色` }),
+  ]);
+}
 
 /** 意图标签：优先用服务端给的，保证前后端只有一处定义。 */
 function intentLabel(key) {
@@ -49,6 +103,7 @@ async function loadMeta() {
 async function refreshPatrol() {
   state.patrol = await get('/patrol');
   renderSources();
+  renderAutoPatrol();
   renderProgress();
   renderOneClick();
 }
@@ -78,20 +133,56 @@ function selectedStoreIds() {
   return boxes.map((box) => box.value);
 }
 
-/** 启动巡逻。 */
-async function startPatrol() {
-  const body = {
-    ...state.options,
-    storeIds: selectedStoreIds(),
-  };
+/**
+ * 某个渠道下当前勾选的店铺 id（全勾 = 空数组 = 全部）。
+ *
+ * 为什么要按渠道算：sourceIds 是**全局**筛选，拿别的渠道的勾选去筛这个渠道，结果会是
+ * 0 个目标 —— 比如只勾了亚马逊的店，再点飞书邮箱的「重新扫描」，邮箱一个都不会跑。
+ * @param {string} channelId - 渠道 id。
+ * @returns {string[]} 店铺 id；空数组表示这个渠道全部都要。
+ */
+function selectedStoreIdsOf(channelId) {
+  const ids = (state.patrol?.sources?.[channelId]?.items ?? []).map((source) => source.storeId);
+  const chosen = ids.filter((id) => state.selectedStores?.has(id));
+  return chosen.length === ids.length ? [] : chosen;
+}
+
+/** 启动一次巡逻（参数由调用方拼好）。 */
+async function startPatrolWith(body, message) {
   try {
     await post('/patrol', body);
-    toast('巡逻已启动，正在依次打开店铺…');
+    toast(message);
     await refreshPatrol();
     startPolling();
   } catch (cause) {
     toast(`启动失败：${cause.message}`, 'error');
   }
+}
+
+/** 一键巡逻：全部渠道、按勾选的目标。 */
+async function startPatrol() {
+  await startPatrolWith({ ...state.options, storeIds: selectedStoreIds() }, '巡逻已启动，正在依次打开店铺…');
+}
+
+/**
+ * 只巡逻一个渠道：扫描 → 逐店读取 → 生成草稿 → 写进紫鸟浏览器的回复框。
+ *
+ * 与「一键巡逻」的区别只有范围。**closeAfter 强制为 false**，不看界面上那个勾选：
+ * 草稿正躺在浏览器输入框里等着人工核对，跑完把窗口关掉等于白填一场 ——
+ * 「写入后不关浏览器、留在那里给工作人员检查」正是这个按钮存在的意义。
+ * @param {object} channel - 渠道（含 id / label / enabled）。
+ * @returns {Promise<void>} 完成。
+ */
+async function runChannelPatrol(channel) {
+  await startPatrolWith(
+    {
+      ...state.options,
+      channels: [channel.id],
+      storeIds: selectedStoreIdsOf(channel.id),
+      closeAfter: false,
+    },
+    `已开始巡逻${channel.label}：跑完浏览器会留在原处，等你核对`,
+  );
 }
 
 /** 停止巡逻。 */
@@ -159,20 +250,156 @@ function optionRow() {
   return node('div', {}, [
     node('div', { class: 'field-row patrol-options' }, [
       numberField('最多扫几个目标', 'maxStores', 0, 500, '0 = 全部'),
-      numberField('每个目标最多几条草稿', 'maxPerStore', 1, 50, ''),
-      checkbox('无头模式', 'headless', '只影响亚马逊：不弹窗，但出问题时看不到页面'),
-      checkbox('跑完关闭店铺', 'closeAfter', '只影响亚马逊'),
+      numberField('每个目标最多几条草稿', 'maxPerStore', 1, 50, '上限 50，也是默认值'),
+      checkbox('跑完关闭店铺', 'closeAfter', '只影响亚马逊：会把已填入但还没发送的回复一起关掉'),
     ]),
     node('div', { class: 'field-row patrol-options' }, [
       checkbox('同时把邮件草稿写进飞书草稿箱', 'writeMailDrafts', '仍然只存草稿、不发送；相当于替你在飞书里点一遍「存草稿」'),
-      checkbox(
-        '生成草稿后自动填入亚马逊回复框',
-        'autoFillAmazon',
-        '只影响亚马逊：草稿生成后直接填进已经打开的那条会话的回复框，**不会发送**。'
-          + '代价是跑一遍 8 家店会在浏览器里留下十几到几十个未发送的输入框。',
-      ),
+    ]),
+    node('div', { class: 'field-row patrol-options' }, [
+      node('span', {
+        class: 'field-hint',
+        text: '草稿生成后默认直接填进紫鸟浏览器里那条会话的回复框（只填不发送）：'
+          + '浏览器始终可见，核对无误后你自己点发送。',
+      }),
     ]),
   ]);
+}
+
+/**
+ * 定时巡检的一句话状态（写在一键巡逻的大按钮下面）。
+ *
+ * 关闭时也要明说 —— 用到这一页时最该先确认的，就是「待会儿它会不会自己把浏览器打开」。
+ * @param {object|null} auto - /api/patrol 里的 autoPatrol 快照。
+ * @returns {string} 一句话。
+ */
+function autoPatrolLine(auto) {
+  if (!auto) return '定时巡检：状态未知（后端可能还是旧版本，重启 DSH 后可见）';
+  if (!auto.enabled) return '定时巡检：已关闭 —— 只在你手动点按钮时才会跑';
+  if (!auto.times || auto.times.length === 0) {
+    return '定时巡检：已启用，但还没添加巡检时刻 —— 现在不会自动跑';
+  }
+  const head = `定时巡检：每天 ${auto.times.length} 次（${auto.times.join(' / ')}）`;
+  const now = auto.wouldRun ? `现在正在跑 ${auto.dueSlot} 这一次` : `当前不跑（${auto.blockedText}）`;
+  const next = auto.nextAt ? `，下次 ${auto.nextSlot}（${dateTime(auto.nextAt)}）` : '';
+  return `${head} · ${now}${next}`;
+}
+
+/** 时刻表在页面上是「本地草稿」：初始化一次，改完点保存才回写。 */
+function ensureAutoTimes(auto) {
+  if (state.autoTimes !== null) return;
+  state.autoTimes = Array.isArray(auto?.times) ? [...auto.times] : [];
+  state.autoEnabled = auto?.enabled === true;
+}
+
+/** 新加一行时挑一个还没被占用的时间，别让两行都默认同一个点。 */
+function nextFreeTime(times) {
+  const candidates = ['06:00', '09:00', '12:00', '14:00', '18:00', '20:00', '22:00'];
+  return candidates.find((time) => !times.includes(time)) ?? '12:00';
+}
+
+/** 面板底部那行详细状态。 */
+function autoStatusText(auto) {
+  const parts = [auto.enabled ? '已启用' : '未启用'];
+  if (auto.enabled) {
+    parts.push(`今天 ${auto.times.length} 次，已跑 ${auto.firedToday?.length ?? 0} 次`);
+    if (auto.nextAt) parts.push(`下次 ${auto.nextSlot}（${dateTime(auto.nextAt)}）`);
+    parts.push(auto.wouldRun ? `现在就会跑（${auto.dueSlot}）` : `当前不跑：${auto.blockedText}`);
+  }
+  const last = auto.lastAutoRun;
+  if (last) parts.push(`上次 ${dateTime(last.startedAt)} ${last.status}（新草稿 ${num(last.draftsCreated)}）`);
+  else if (auto.lastStartedAt) parts.push(`上次启动 ${dateTime(auto.lastStartedAt)}`);
+  return parts.join(' · ');
+}
+
+/** 保存巡检时刻表。 */
+async function saveAutoPatrol() {
+  try {
+    const saved = await post('/settings', {
+      autoPatrol: { enabled: state.autoEnabled, times: state.autoTimes.filter(Boolean) },
+    });
+    // 后端会去重 / 排序 / 丢掉非法项，以它返回的为准，免得界面和落盘的列表对不上。
+    const times = saved?.settings?.autoPatrol?.times;
+    if (Array.isArray(times)) state.autoTimes = [...times];
+    toast('定时巡检已保存');
+    await refreshPatrol();
+  } catch (cause) {
+    toast(`保存失败：${cause.message}`, 'error');
+  }
+}
+
+/** 渲染「定时巡检」面板：开关 + 可增删的时刻表 + 状态。 */
+function renderAutoPatrol() {
+  const container = document.getElementById('patrol-auto');
+  if (!container) return;
+  clear(container);
+  const auto = state.patrol?.autoPatrol;
+  if (!auto) {
+    container.appendChild(
+      node('div', { class: 'muted', text: '状态未知：后端可能还是旧版本，重启 DSH 后可见。' }),
+    );
+    return;
+  }
+  ensureAutoTimes(auto);
+
+  container.appendChild(
+    node('div', { class: 'field-row patrol-options' }, [
+      node('label', { class: 'field field-check' }, [
+        node('input', {
+          type: 'checkbox',
+          checked: state.autoEnabled,
+          onchange: (event) => {
+            state.autoEnabled = event.target.checked;
+          },
+        }),
+        node('span', { class: 'field-label', text: '启用定时巡检' }),
+        node('span', {
+          class: 'field-hint',
+          text: '默认关闭。打开后到点会自己跑一遍完整巡逻（扫描 → 生成草稿 → 填入回复框，'
+            + '仍然不发送）—— 无人值守会自己打开店铺浏览器，所以必须由你显式打开。改完记得点保存。',
+        }),
+      ]),
+    ]),
+  );
+
+  container.appendChild(
+    node('div', {
+      class: 'muted',
+      text: `巡检时刻（每天各跑一次，共 ${state.autoTimes.length} 次；上一轮没跑完就跳过，不会并发）`,
+    }),
+  );
+
+  const rows = node('div', { class: 'auto-times' });
+  if (state.autoTimes.length === 0) {
+    rows.appendChild(node('div', { class: 'muted', text: '还没添加巡检时刻 —— 现在不会自动跑。' }));
+  }
+  state.autoTimes.forEach((time, index) => {
+    rows.appendChild(
+      node('div', { class: 'auto-time-row' }, [
+        input(time, '', (value) => {
+          state.autoTimes[index] = value;
+        }, { type: 'time' }),
+        button('删除', () => {
+          state.autoTimes.splice(index, 1);
+          renderAutoPatrol();
+        }),
+      ]),
+    );
+  });
+  container.appendChild(rows);
+
+  container.appendChild(
+    node('div', { class: 'actions' }, [
+      button('+ 添加一次巡检', () => {
+        state.autoTimes.push(nextFreeTime(state.autoTimes));
+        state.autoTimes.sort();
+        renderAutoPatrol();
+      }),
+      button('保存巡检时刻表', () => saveAutoPatrol(), 'primary'),
+    ]),
+  );
+
+  container.appendChild(node('div', { class: 'muted auto-status', text: autoStatusText(auto) }));
 }
 
 /** 大按钮区。 */
@@ -200,7 +427,8 @@ function renderOneClick() {
         }),
         node('div', { class: 'patrol-hero-hint muted' }, [
           node('span', {
-            text: '依次打开每家亚马逊店铺的「买家与卖家消息服务 · 需要回复」，读取会话并生成英文草稿。全程只读页面 + 只写草稿，不会发送任何消息。',
+            text: '依次打开每家亚马逊店铺的「买家与卖家消息服务 · 需要回复」，读取会话并生成英文草稿，'
+              + '并默认直接填进紫鸟浏览器里那条会话的回复框。全程只读页面 + 只填不发送 —— 核对后你自己点发送。',
           }),
         ]),
       ]),
@@ -210,6 +438,12 @@ function renderOneClick() {
             node('span', { text: `上次巡逻：${dateTime(run.startedAt)} · ${run.status}` }),
           ])
         : null,
+    ]),
+  );
+  // 自动巡逻会不会突然自己跑起来，是这一页最该先知道的事 —— 直接写在按钮下面。
+  container.appendChild(
+    node('div', { class: 'muted auto-patrol-line' }, [
+      node('span', { text: autoPatrolLine(state.patrol?.autoPatrol) }),
     ]),
   );
   container.appendChild(optionRow());
@@ -289,7 +523,7 @@ function sourceScanNote(scan, channel) {
   if (scan.added?.length) parts.push(`新增 ${scan.added.map((entry) => entry.storeName).join('、')}`);
   if (scan.removed?.length) parts.push(`已移除 ${scan.removed.map((entry) => entry.storeName).join('、')}`);
   if (!scan.checkedAt) {
-    blocks.push(node('div', { class: 'muted', text: '还没扫描过。点「重新扫描」拉一次最新列表。' }));
+    blocks.push(node('div', { class: 'muted', text: '还没扫描过。点「重新扫描」跑一遍（会生成草稿并写进浏览器），或点「仅刷新列表」只看目标。' }));
   } else if (parts.length) {
     blocks.push(node('div', { class: 'scan-diff', text: parts.join('；') }));
   }
@@ -336,21 +570,36 @@ function renderSources() {
   for (const channel of channels) {
     const scan = scans[channel.id] ?? { items: [] };
     const list = scan.items ?? [];
+    const off = channel.enabled === false;
+    const busy = Boolean(state.patrol?.running);
     const block = node('div', { class: 'source-block' });
 
     block.appendChild(
       node('div', { class: 'sub-head' }, [
         node('h3', {
-          text: channel.enabled === false ? `${channel.label}（未启用）` : `${channel.label}（${list.length}）`,
+          text: off ? `${channel.label}（未启用）` : `${channel.label}（${list.length}）`,
         }),
         node('div', { class: 'sub-actions' }, [
           node('span', { class: 'muted', text: scan.checkedAt ? `上次扫描 ${dateTime(scan.checkedAt)}` : '尚未扫描' }),
+          // 便宜的那个：紫鸟里新增/删了店铺时用它，只拉列表、不开浏览器、不生成草稿。
           node('button', {
             type: 'button',
-            class: `btn${state.scanning ? ' is-busy' : ''}`,
-            text: state.scanning ? '扫描中…' : '重新扫描',
+            class: `btn btn-ghost${state.scanning ? ' is-busy' : ''}`,
+            text: state.scanning ? '刷新中…' : '仅刷新列表',
+            title: '只重新拉一次目标列表（不生成草稿、不打开浏览器）',
             disabled: state.scanning,
             onclick: () => runScan(channel.id).catch((cause) => toast(cause.message, 'error')),
+          }),
+          // 真干活的那个：扫描 + 生成草稿 + 直接写进浏览器回复框，跑完不关浏览器。
+          node('button', {
+            type: 'button',
+            class: `btn btn-primary${busy ? ' is-busy' : ''}`,
+            text: busy ? '巡逻进行中…' : '重新扫描',
+            title: off
+              ? '该渠道未启用：先在「设置」里打开'
+              : '扫描 → 生成草稿 → 直接写进紫鸟浏览器的回复框；跑完不关闭浏览器，留给人工核对',
+            disabled: busy || state.scanning || off,
+            onclick: () => runChannelPatrol(channel).catch((cause) => toast(cause.message, 'error')),
           }),
         ]),
       ]),
@@ -613,6 +862,11 @@ function renderDrafts() {
   const container = document.getElementById('patrol-drafts');
   if (!container) return;
   clear(container);
+
+  // 只有真的新增了才显示图例：空跑一遍不该冒出一个「新增 0 条」的色块。
+  const recent = lastRunInfo();
+  if (recent && recent.created > 0) container.appendChild(newRunLegend(recent));
+
   container.appendChild(draftFilters());
 
   const items = state.drafts?.items ?? [];
@@ -626,9 +880,17 @@ function renderDrafts() {
     return;
   }
 
-  const rows = items.map((item) =>
-    node('tr', { class: item.needsHuman ? 'row-alert' : '', onclick: () => openDrawer(item.id) }, [
-      node('td', {}, [badge(STATUS_LABEL[item.status] ?? item.status, STATUS_TONE[item.status] ?? 'idle')]),
+  const rows = items.map((item) => {
+    // 「新生成」= 这条草稿的 runId 就是最近一次巡逻。人工建的、以及更早那些批次的都不算。
+    const isNew = Boolean(recent && item.runId && item.runId === recent.id);
+    const classes = [item.needsHuman ? 'row-alert' : '', isNew ? `row-new row-new-${recent.color}` : '']
+      .filter(Boolean)
+      .join(' ');
+    return node('tr', { class: classes, onclick: () => openDrawer(item.id) }, [
+      node('td', {}, [
+        badge(STATUS_LABEL[item.status] ?? item.status, STATUS_TONE[item.status] ?? 'idle'),
+        isNew ? node('span', { class: `badge badge-new badge-new-${recent.color}`, text: '本次新增' }) : null,
+      ]),
       node('td', { text: item.storeName || item.storeId }),
       node('td', { text: item.buyer || DASH }),
       node('td', { text: item.intentLabel || intentLabel(item.intent) }),
@@ -636,8 +898,21 @@ function renderDrafts() {
       node('td', { text: item.orderId || DASH }),
       node('td', { class: 'muted', text: item.dueText || DASH }),
       node('td', { class: item.needsHuman ? 'cell-overdue' : 'muted', text: item.needsHuman ? '需确认' : '' }),
-    ]),
-  );
+      node('td', {}, [
+        node('button', {
+          type: 'button',
+          class: 'btn btn-xs btn-warn',
+          text: '删除',
+          title: '从草稿库里删掉这条（撤销不了）；只是不想再看到它请用详情里的「丢弃」',
+          // 整行点了会开详情，这里必须拦一下，否则点删除顺带把抽屉也打开了。
+          onclick: (event) => {
+            event.stopPropagation();
+            deleteDraft(item);
+          },
+        }),
+      ]),
+    ]);
+  });
 
   container.appendChild(
     node('table', { class: 'table table-clickable' }, [
@@ -650,7 +925,8 @@ function renderDrafts() {
           node('th', { text: '主题' }),
           node('th', { text: '订单号' }),
           node('th', { text: '到期' }),
-          node('th', { text: '' }),
+          node('th', { text: '需确认' }),
+          node('th', { text: '操作' }),
         ]),
       ]),
       node('tbody', {}, rows),
@@ -682,6 +958,36 @@ async function saveDraft(id, changes, message) {
     renderDrawer();
   } catch (cause) {
     toast(cause.message, 'error');
+  }
+}
+
+/**
+ * 真删一条草稿。
+ *
+ * 与「丢弃」的区别必须说清楚：丢弃只是改状态、记录和正文都还在，随时能翻回来；
+ * 删除是从库里抹掉，撤销不了。所以这里一定弹确认，并把区别写进确认框 ——
+ * 点错的人还有机会改主意去点「丢弃」。
+ * @param {object} item - 草稿。
+ * @returns {Promise<void>} 完成。
+ */
+async function deleteDraft(item) {
+  const who = (item.storeName || item.storeId) + ' / ' + (item.buyer || '买家');
+  const ok = window.confirm(
+    '删除这条草稿？\n\n' +
+      who + '\n' +
+      (item.subject || '') + '\n\n' +
+      '这会把它从草稿库里抹掉（连正文副本一起），撤销不了。\n' +
+      '如果只是不想再看到它、但以后还要翻回来查，请改用「丢弃」。',
+  );
+  if (!ok) return;
+  try {
+    await del('/drafts/' + encodeURIComponent(item.id));
+    toast('草稿已删除');
+    if (state.drawer?.id === item.id) state.drawer = null;
+    await refreshDrafts();
+    renderDrawer();
+  } catch (cause) {
+    toast('删除失败：' + cause.message, 'error');
   }
 }
 
@@ -768,6 +1074,7 @@ function renderDrawer() {
         button('复制正文', () => copy(bodyBox.value)),
         button('标记已批准', () => saveDraft(item.id, { status: 'approved' }, '已批准')),
         button('丢弃', () => saveDraft(item.id, { status: 'discarded' }, '已丢弃')),
+        button('删除草稿', () => deleteDraft(item), 'warn'),
       ]),
       item.platform === 'lark-mail'
         ? node('div', { class: 'drawer-section' }, [
@@ -827,6 +1134,10 @@ export async function render(container, ctx) {
     node('div', { id: 'patrol-action' }),
     node('div', { class: 'panel-sub' }, [node('div', { id: 'patrol-sources' })]),
     node('div', { class: 'panel-sub' }, [node('h3', { text: '巡逻进度' }), node('div', { id: 'patrol-progress' })]),
+  ]));
+  container.appendChild(node('section', { class: 'panel' }, [
+    node('div', { class: 'panel-head' }, [node('h2', { text: '定时巡检' })]),
+    node('div', { id: 'patrol-auto' }),
   ]));
   container.appendChild(node('section', { class: 'panel' }, [
     node('div', { class: 'panel-head' }, [node('h2', { text: '草稿库' })]),

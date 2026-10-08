@@ -231,3 +231,33 @@ test('rev 每次写入递增', () => {
   store.upsert(sample({ caseId: 'y' }));
   assert.equal(store.rev, 2);
 });
+
+test('remove：真删一条（记录 + 正文副本），不存在时返回 null', () => {
+  const { store, dir } = makeStore();
+  const { item } = store.upsert(sample());
+  const textPath = path.join(dir, item.id + '.txt');
+  assert.equal(fs.existsSync(textPath), true, '先确认副本确实写了');
+
+  assert.equal(store.remove('d_nope'), null, '不存在返回 null，交给路由报 404');
+  assert.equal(store.counts().total, 1, '删一个不存在的 id 不能误删别的');
+
+  const removed = store.remove(item.id);
+  assert.equal(removed.id, item.id);
+  assert.equal(store.get(item.id), undefined);
+  assert.equal(store.counts().total, 0);
+  assert.equal(fs.existsSync(textPath), false, '正文副本要一起清掉，别在目录里留孤儿文件');
+
+  // 必须落盘：换个实例读同一目录也该是空的。
+  assert.equal(store.rev, 2);
+  const reopened = createDraftStore({ dir, logger: silent });
+  assert.equal(reopened.counts().total, 0);
+});
+
+test('remove：删掉之后同一个 caseId 能重新生成，而不是被判成「更新」', () => {
+  const { store } = makeStore();
+  const first = store.upsert(sample()).item;
+  store.remove(first.id);
+  const again = store.upsert(sample());
+  assert.equal(again.created, true, '删掉就该能重建');
+  assert.notEqual(again.item.id, first.id);
+});

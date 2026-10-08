@@ -53,6 +53,8 @@ export const get = (path, query) => call('GET', path, { query });
 export const post = (path, body) => call('POST', path, { body: body ?? {} });
 /** PATCH。 */
 export const patch = (path, body) => call('PATCH', path, { body: body ?? {} });
+/** DELETE。 */
+export const del = (path) => call('DELETE', path, {});
 
 /**
  * 把筛选对象变成查询串。

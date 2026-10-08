@@ -84,6 +84,11 @@ function renderSubNav(active) {
 const HOST_CONTRACT = {
   channels: ['amazon'],
   metaKeys: ['drafts', 'patrol'],
+  // 设置页的「禁用 / 启用 CLI」开关要靠 /health 里的 clis[*].enabled 才画得对：
+  // 旧后端没有这个字段，按钮会照常出现、点下去却静默无效 —— 那比不显示更糟。
+  healthClis: ['ziniao', 'lark'],
+  // 能力位：新前端要用、旧后端还没有的功能。缺了就在顶部提示重启，别让人点空按钮。
+  capabilities: ['drafts.delete'],
 };
 
 /** 错配时把「缺了什么」记下来，贴在提示里，避免使用者只看到一句 404。 */
@@ -113,6 +118,22 @@ async function checkHostVersion() {
   }
   for (const key of HOST_CONTRACT.metaKeys) {
     if (!(meta && key in meta)) missing.push(`/api/meta 的 ${key}`);
+  }
+  const capabilities = meta?.capabilities ?? [];
+  for (const capability of HOST_CONTRACT.capabilities) {
+    if (!capabilities.includes(capability)) missing.push(`能力 ${capability}`);
+  }
+  if (missing.length === 0) {
+    try {
+      const health = await get('/health');
+      for (const key of HOST_CONTRACT.healthClis) {
+        if (typeof health?.clis?.[key]?.enabled !== 'boolean') {
+          missing.push(`/api/health 的 clis.${key}.enabled`);
+        }
+      }
+    } catch {
+      // 体检接口偶发失败不该弹出「请重启 DSH」：那是另一个问题，设置页自己会报错。
+    }
   }
   hostMismatchMissing = missing;
   hostMismatch = missing.length > 0;

@@ -88,6 +88,22 @@ test('normalizeSettings 把 cliArgs 的字符串写法收敛成数组', () => {
   assert.deepEqual(normalized.cliArgs.ziniao, ['--x']);
 });
 
+test('normalizeSettings：CLI 开关默认都启用，也能逐个关掉', () => {
+  assert.deepEqual(DEFAULT_SETTINGS.cliEnabled, { ziniao: true, lark: true });
+  assert.deepEqual(normalizeSettings({}).cliEnabled, { ziniao: true, lark: true });
+  // 只提交一个键时，另一个必须保持默认，不能被一起抹掉。
+  assert.deepEqual(normalizeSettings({ cliEnabled: { lark: false } }).cliEnabled, {
+    ziniao: true,
+    lark: false,
+  });
+  // 非布尔值按真值收敛；整个字段不是对象时退回默认。
+  assert.deepEqual(normalizeSettings({ cliEnabled: { ziniao: 0 } }).cliEnabled, {
+    ziniao: false,
+    lark: true,
+  });
+  assert.deepEqual(normalizeSettings({ cliEnabled: 'nope' }).cliEnabled, { ziniao: true, lark: true });
+});
+
 test('settingsDir 优先 DSH_CS_DIR，其次显式 profile，最后环境变量推导', () => {
   assert.equal(settingsDir({ DSH_CS_DIR: '/tmp/cs', DSH_HOME: '/tmp/home' }), path.resolve('/tmp/cs'));
   assert.equal(

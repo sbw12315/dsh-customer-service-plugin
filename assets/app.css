@@ -17,6 +17,13 @@
   --cs-ok: #12894f;
   --cs-warn: #b06b00;
   --cs-error: #c8362f;
+  /* 「本次巡逻新增」的标记色：一次巡逻轮一种，前端按 run id 挑（见 page-patrol.js）。 */
+  --cs-new-0: #2f6bff;
+  --cs-new-1: #12894f;
+  --cs-new-2: #b06b00;
+  --cs-new-3: #8b5cf6;
+  --cs-new-4: #0e8f9e;
+  --cs-new-5: #c8362f;
   --cs-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -31,6 +38,12 @@
   --cs-ok: #4ec98a;
   --cs-warn: #e0a94a;
   --cs-error: #f2706a;
+  --cs-new-0: #6c9bff;
+  --cs-new-1: #4ec98a;
+  --cs-new-2: #e0a94a;
+  --cs-new-3: #b794f6;
+  --cs-new-4: #4fd1d9;
+  --cs-new-5: #f2706a;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -45,6 +58,12 @@
     --cs-ok: #4ec98a;
     --cs-warn: #e0a94a;
     --cs-error: #f2706a;
+    --cs-new-0: #6c9bff;
+    --cs-new-1: #4ec98a;
+    --cs-new-2: #e0a94a;
+    --cs-new-3: #b794f6;
+    --cs-new-4: #4fd1d9;
+    --cs-new-5: #f2706a;
   }
 }
 
@@ -182,6 +201,13 @@ body {
 
 .card-title {
   font-weight: 600;
+}
+
+/* 卡片右上角：状态徽章 + 一个就地启用 / 禁用的按钮 */
+.card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .badge {
@@ -328,6 +354,12 @@ input[type="text"]:focus {
 
 .btn-warn {
   color: var(--cs-warn);
+}
+
+/* 表格行里的小按钮：默认的 .btn 内边距会把行撑高 */
+.btn-xs {
+  padding: 2px 8px;
+  font-size: 11px;
 }
 
 .save-state {
@@ -1043,5 +1075,130 @@ select {
   color: var(--cs-text-dim);
   font-size: 12px;
   line-height: 1.7;
+}
+
+/* ── 「本次巡逻新增」的标记色 ─────────────────────────────────────────────
+   刻意放在这一段最后：上面的 .row-alert 也用 td:first-child 画左边线，两者特异性
+   相同，靠源码顺序决胜 —— 「这条是刚跑出来的」比「需要人工确认」更该先被看见。 */
+
+.row-new {
+  background: color-mix(in srgb, var(--new-line) 10%, transparent);
+}
+
+.row-new td:first-child {
+  box-shadow: inset 2px 0 0 var(--new-line);
+}
+
+.row-new-0,
+.legend-new-0 {
+  --new-line: var(--cs-new-0);
+}
+
+.row-new-1,
+.legend-new-1 {
+  --new-line: var(--cs-new-1);
+}
+
+.row-new-2,
+.legend-new-2 {
+  --new-line: var(--cs-new-2);
+}
+
+.row-new-3,
+.legend-new-3 {
+  --new-line: var(--cs-new-3);
+}
+
+.row-new-4,
+.legend-new-4 {
+  --new-line: var(--cs-new-4);
+}
+
+.row-new-5,
+.legend-new-5 {
+  --new-line: var(--cs-new-5);
+}
+
+.badge-new {
+  margin-left: 6px;
+  font-weight: 600;
+}
+
+.badge-new-0 {
+  color: var(--cs-new-0);
+}
+
+.badge-new-1 {
+  color: var(--cs-new-1);
+}
+
+.badge-new-2 {
+  color: var(--cs-new-2);
+}
+
+.badge-new-3 {
+  color: var(--cs-new-3);
+}
+
+.badge-new-4 {
+  color: var(--cs-new-4);
+}
+
+.badge-new-5 {
+  color: var(--cs-new-5);
+}
+
+.legend-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--cs-text-dim);
+}
+
+.legend-new i {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--new-line);
+}
+
+/* 巡逻页大按钮下面那行「定时巡检」状态 */
+.auto-patrol-line {
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+
+/* 工作台 · 定时巡检的时刻表：一行一个时间，可增删 */
+.auto-times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 10px;
+}
+
+.auto-time-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 9px;
+  border: 1px solid var(--cs-border);
+  border-radius: 8px;
+  background: var(--cs-bg-soft);
+}
+
+.auto-time-row input[type='time'] {
+  border: none;
+  background: transparent;
+  color: var(--cs-text);
+  font: inherit;
+  font-size: 13px;
+  padding: 2px 0;
+}
+
+.auto-status {
+  margin-top: 8px;
+  font-size: 12px;
 }
 

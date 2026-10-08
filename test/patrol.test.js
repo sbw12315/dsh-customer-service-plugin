@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { PatrolError, createPatrolService, normalizePatrolOptions } from '../lib/patrol.js';
+import { PATROL_DEFAULTS, PatrolError, createPatrolService, normalizePatrolOptions } from '../lib/patrol.js';
+import { DEFAULT_SETTINGS } from '../lib/settings.js';
 import { createDraftStore } from '../lib/store/drafts.js';
 import { createQueueStore } from '../lib/store/queue.js';
 
@@ -125,12 +126,12 @@ function fakeAdapter(opts = {}) {
 }
 
 /** 建一套巡逻依赖。 */
-function makeService(adapter, settings = {}) {
+function makeService(adapter, settings = {}, extraAdapters = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-patrol-'));
   const drafts = createDraftStore({ dir: path.join(dir, 'drafts'), logger: silent });
   const queue = createQueueStore({ file: path.join(dir, 'queue.json'), logger: silent });
   const service = createPatrolService({
-    adapters: { [adapter.id]: adapter },
+    adapters: { [adapter.id]: adapter, ...extraAdapters },
     drafts,
     queue,
     settings,
@@ -141,11 +142,10 @@ function makeService(adapter, settings = {}) {
 }
 
 test('normalizePatrolOptions：收敛数值、渠道与目标 id', () => {
-  const defaults = { maxStores: 0, maxPerStore: 3, headless: false, closeAfter: false, channels: [], writeMailDrafts: false };
+  const defaults = { maxStores: 0, maxPerStore: 3, closeAfter: false, channels: [], writeMailDrafts: false };
   assert.deepEqual(normalizePatrolOptions({ maxPerStore: 999, sourceIds: ['a', '', ' b '] }, defaults), {
     maxStores: 0,
     maxPerStore: 50,
-    headless: false,
     closeAfter: false,
     channels: [],
     writeMailDrafts: false,
@@ -157,6 +157,29 @@ test('normalizePatrolOptions：收敛数值、渠道与目标 id', () => {
   assert.deepEqual(normalizePatrolOptions({ channels: ['amazon', 'lark-mail'] }, defaults).channels, ['amazon', 'lark-mail']);
   assert.equal(normalizePatrolOptions({ maxStores: -5 }, defaults).maxStores, 0);
   assert.equal(normalizePatrolOptions({}, defaults).maxPerStore, 3);
+});
+
+test('默认值：每个目标最多 50 条草稿，也就是上限本身', () => {
+  assert.equal(PATROL_DEFAULTS.maxPerStore, 50);
+  assert.equal(DEFAULT_SETTINGS.patrol.maxPerStore, 50);
+  assert.equal(normalizePatrolOptions({}).maxPerStore, 50);
+  // 上限同样是 50：给个更大的数会被收敛回来，不会写出界。
+  assert.equal(normalizePatrolOptions({ maxPerStore: 9999 }).maxPerStore, 50);
+  assert.equal(normalizePatrolOptions({ maxPerStore: 0 }).maxPerStore, 1, '下限仍是 1');
+});
+
+test('无头模式已移除，草稿默认直接填入回复框', () => {
+  // 无头：settings 与巡逻参数里都不该再有这个键。
+  assert.equal(Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS.patrol, 'headless'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(PATROL_DEFAULTS, 'headless'), false);
+  assert.equal(normalizePatrolOptions({}).headless, undefined);
+
+  // 填入回复框：默认开启，且不再由 settings 控制。
+  assert.equal(PATROL_DEFAULTS.autoFillAmazon, true);
+  assert.equal(normalizePatrolOptions({}).autoFillAmazon, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(DEFAULT_SETTINGS.patrol, 'autoFillAmazon'), false);
+  // 仍然允许显式关掉（排障/测试用）。
+  assert.equal(normalizePatrolOptions({ autoFillAmazon: false }).autoFillAmazon, false);
 });
 
 test('巡逻全流程：两家店都过一遍，按会话生成草稿并入队', async () => {
@@ -374,12 +397,30 @@ test('巡逻状态落盘到 run/patrol-last.json，且不含草稿正文', async
 
 test('巡逻参数来自 settings.patrol，并被单次请求覆盖', async () => {
   const adapter = fakeAdapter();
-  const { service } = makeService(adapter, { patrol: { maxPerStore: 1, headless: true, maxStores: 0, closeAfter: true } });
+  const { service } = makeService(adapter, { patrol: { maxPerStore: 1, maxStores: 0, closeAfter: true } });
   service.start({});
   await waitFor(() => service.snapshot().run.status !== 'running');
   const run = service.snapshot().run;
   assert.equal(run.options.maxPerStore, 1);
-  assert.equal(run.options.headless, true);
   assert.equal(run.options.closeAfter, true);
   assert.equal(adapter.calls.filter((call) => call[0] === 'closeStore').length, 2);
+});
+
+test('单渠道重新扫描：只碰指定渠道，且 closeAfter=false 时一个浏览器都不关', async () => {
+  const adapter = fakeAdapter();
+  const other = { ...fakeAdapter(), id: 'lark-mail', label: '飞书邮箱' };
+  const { service } = makeService(adapter, {}, { 'lark-mail': other });
+  // 巡逻页每个渠道右边的「重新扫描」就是这么发的：限定渠道 + 强制 closeAfter=false。
+  service.start({ channels: ['amazon'], closeAfter: false });
+  await waitFor(() => service.snapshot().run.status !== 'running');
+  const run = service.snapshot().run;
+  assert.deepEqual(run.options.channels, ['amazon']);
+  assert.equal(run.options.closeAfter, false);
+  assert.ok(adapter.calls.length > 0, '指定渠道要真的跑起来');
+  assert.equal(other.calls.length, 0, '没指定的渠道一次都不该碰');
+  assert.equal(
+    adapter.calls.filter((call) => call[0] === 'closeStore').length,
+    0,
+    'closeAfter=false 时不能关浏览器：草稿还在回复框里等着人工核对',
+  );
 });

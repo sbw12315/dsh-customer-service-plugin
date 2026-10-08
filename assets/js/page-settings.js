@@ -27,11 +27,37 @@ const SERVICE_LABEL = {
 /** 页面状态（只在内存里，重新加载页面即重置）。 */
 const state = { health: null, settings: null };
 
-/** 渲染一个 CLI 的卡片。 */
+/** 禁用一个 CLI 会影响什么：直接写在卡片上，别让人猜。 */
+const CLI_DISABLE_NOTE = {
+  ziniao: '禁用后不再调用紫鸟CLI：亚马逊店铺巡逻会跳过这个渠道，扫描只回报「未启用」。',
+  lark: '禁用后不再调用飞书CLI：飞书邮件渠道不参与巡逻（即使「启用飞书邮箱渠道」是勾上的）。',
+};
+
+/**
+ * 就地启用 / 禁用一个 CLI。
+ *
+ * 刻意不混进「保存设置」那一批：这是个二选一的开关，点完就该立刻生效，
+ * 不用再让人记着去按保存。
+ * @param {string} key - `ziniao` 或 `lark`。
+ * @param {boolean} disabled - 当前是否已禁用（点一下就取反）。
+ * @returns {Promise<void>} 完成。
+ */
+async function setCliEnabled(key, disabled) {
+  try {
+    await post('/settings', { cliEnabled: { [key]: disabled } });
+    toast(disabled ? '已启用' : '已禁用');
+    await refresh();
+  } catch (cause) {
+    toast(`保存失败：${cause.message}`, 'error');
+  }
+}
+
+/** 渲染一个 CLI 的卡片（右上角可以直接禁用 / 启用）。 */
 function cliCard(info) {
-  const ok = Boolean(info.found) && !info.error;
-  const kind = ok ? 'ok' : info.found ? 'warn' : 'error';
-  const label = ok ? '可用' : info.found ? '异常' : '未找到';
+  const disabled = info.enabled === false;
+  const ok = !disabled && Boolean(info.found) && !info.error;
+  const kind = disabled ? 'idle' : ok ? 'ok' : info.found ? 'warn' : 'error';
+  const label = disabled ? '已禁用' : ok ? '可用' : info.found ? '异常' : '未找到';
   const body = [
     kv([
       ['路径', info.path ?? DASH],
@@ -40,12 +66,21 @@ function cliCard(info) {
       ['版本', info.version ?? DASH],
     ]),
   ];
-  if (info.error) {
-    body.push(node('div', { class: 'muted', text: info.error.message }));
-    if (info.error.hint) body.push(node('div', { class: 'muted', text: info.error.hint }));
+  if (disabled) {
+    // 禁用是选择不是故障：不显示 error / 安装命令，只说明禁用之后会发生什么。
+    body.push(node('div', { class: 'muted', text: CLI_DISABLE_NOTE[info.key] ?? '已禁用：插件不会再调用它。' }));
+  } else {
+    if (info.error) {
+      body.push(node('div', { class: 'muted', text: info.error.message }));
+      if (info.error.hint) body.push(node('div', { class: 'muted', text: info.error.hint }));
+    }
+    if (info.fixCommand) body.push(commandRow(info.fixCommand));
   }
-  if (info.fixCommand) body.push(commandRow(info.fixCommand));
-  return card(`${info.label}（${info.bin}）`, badge(label, kind), body);
+  const head = node('div', { class: 'card-actions' }, [
+    badge(label, kind),
+    button(disabled ? '启用' : '禁用', () => setCliEnabled(info.key, disabled)),
+  ]);
+  return card(`${info.label}（${info.bin}）`, head, body);
 }
 
 /** 渲染宿主能力卡片。 */
@@ -115,6 +150,8 @@ function problemsOf(health) {
   const problems = [];
   for (const key of ['ziniao', 'lark']) {
     const info = health.clis[key];
+    // 自己禁用的不算问题：那是选择，不是故障。
+    if (!info || info.enabled === false) continue;
     if (!info.found) problems.push(`${info.label} 未找到`);
     else if (info.error) problems.push(`${info.label} 异常：${info.error.message}`);
   }
@@ -133,6 +170,9 @@ function larkStatusNode() {
   const info = state.health?.clis?.lark;
   if (!info) return node('span', { class: 'muted', text: '未知（先体检一次）' });
   const args = (info.args ?? []).join(' ');
+  if (info.enabled === false) {
+    return node('span', { class: 'muted', text: '已在设置里禁用 —— 邮箱渠道不会参与巡逻' });
+  }
   if (!info.found) {
     return node('span', { class: 'muted', text: `未找到 lark-cli —— 先安装：${info.install ?? 'npm install -g @larksuite/cli'}` });
   }
@@ -168,7 +208,7 @@ function settingsForm() {
     [
       node('p', {
         class: 'hint',
-        text: '自动探测只在 PATH 与常见安装目录里找。路径留空表示回到自动探测；附加参数会前置到该 CLI 的每一次调用之前（例如 --profile example-lark-profile）。',
+        text: '自动探测只在 PATH 与常见安装目录里找。路径留空表示回到自动探测；附加参数会前置到该 CLI 的每一次调用之前（例如 --profile example-lark-profile）。要彻底不用某个 CLI，点它卡片右上角的「禁用」。',
       }),
       node('div', { class: 'field-row' }, [
         field('紫鸟CLI 路径（ziniao-cli）', textInput('cli-ziniao', s.cliPaths.ziniao, '/opt/homebrew/bin/ziniao-cli')),
@@ -232,6 +272,7 @@ async function save(stateLabel) {
       dataDir: valueOf('data-dir').trim(),
       sla: { defaultHours: valueOf('sla-hours') },
       retention: { auditDays: valueOf('audit-days') },
+
     });
     stateLabel.textContent = saved.dataDirChanged ? '已保存，数据目录已热切换' : '已保存';
     toast('设置已保存');

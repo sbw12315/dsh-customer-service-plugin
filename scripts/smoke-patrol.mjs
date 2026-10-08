@@ -14,7 +14,7 @@
  *   node scripts/smoke-patrol.mjs                         # 按 settings.patrol 跑全部店铺
  *   node scripts/smoke-patrol.mjs --max-per-store=2 --max-stores=3
  *   node scripts/smoke-patrol.mjs --stores=27630232762680,27899883383180
- *   node scripts/smoke-patrol.mjs --headless --close-after
+ *   node scripts/smoke-patrol.mjs --close-after
  */
 
 import { spawn } from 'node:child_process';
@@ -98,7 +98,6 @@ const patrolSettings = {
     ...settings.patrol,
     ...(args.maxPerStore !== undefined ? { maxPerStore: Number(args.maxPerStore) } : {}),
     ...(args.maxStores !== undefined ? { maxStores: Number(args.maxStores) } : {}),
-    ...(args.headless !== undefined ? { headless: Boolean(args.headless) } : {}),
     ...(args.closeAfter !== undefined ? { closeAfter: Boolean(args.closeAfter) } : {}),
   },
 };

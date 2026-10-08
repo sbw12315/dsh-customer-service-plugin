@@ -86,6 +86,8 @@ test('外壳按「能力」探测宿主半是否跟得上，而不是比对版�
   assert.match(text, /HOST_CONTRACT/, '需要有明确的接口契约声明');
   assert.match(text, /channels:\s*\[\s*'amazon'\s*\]/, '契约里要包含 amazon 渠道');
   assert.match(text, /metaKeys:\s*\[[^\]]*'drafts'[^\]]*'patrol'/, '契约里要包含 drafts / patrol');
+  assert.match(text, /healthClis:\s*\[\s*'ziniao'\s*,\s*'lark'\s*\]/, '契约里要包含两个 CLI 的启用开关');
+  assert.match(text, /capabilities:\s*\[\s*'drafts\.delete'\s*\]/, '契约里要包含删除草稿的能力位');
   // 退化回「只要 /meta 不 404 就算同步」是错的：旧宿主半的 /meta 是存在的。
   assert.equal(
     /await get\('\/meta'\);\s*\n\s*hostMismatch = false;/.test(text),

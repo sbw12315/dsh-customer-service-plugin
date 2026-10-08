@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { ROUTES, apply, intOf, matchPath, matchRoute } from '../lib/index.js';
+import { formatClock, zonedMinutes } from '../lib/auto-patrol.js';
 
 /** 造一个只实现插件用到的那部分能力的 ctx。 */
 function fakeContext() {
@@ -264,6 +265,7 @@ test('巡逻接口：状态可读、能启动、能停止，且草稿库为空�
     assert.equal(before.status, 200);
     assert.equal(before.payload.data.running, false);
     assert.equal(before.payload.data.run, null);
+    assert.equal(before.payload.data.lastRun, null, '一次都没跑过时没有「最近一次巡逻」');
     assert.ok(Array.isArray(before.payload.data.sources.amazon.items));
     assert.ok(Array.isArray(before.payload.data.channels), '要带上渠道清单');
     assert.ok(before.payload.data.defaults.maxPerStore >= 1);
@@ -281,6 +283,67 @@ test('巡逻接口：状态可读、能启动、能停止，且草稿库为空�
     const stopped = await call('POST', '/patrol/stop', {});
     assert.equal(stopped.status, 200);
     assert.equal(typeof stopped.payload.data.stopped, 'boolean');
+
+    // 「最近一次巡逻」必须报出来：前端靠它判断哪批草稿是刚生成的（要标色）。
+    const after = await call('GET', '/patrol');
+    assert.ok(after.payload.data.run, '跑过一次之后快照里就留着这次 run');
+    assert.equal(after.payload.data.lastRun?.id, after.payload.data.run.id);
+    assert.equal(after.payload.data.lastRun.draftsCreated, 0);
+  });
+});
+
+test('重启后仍能认出「最近一次巡逻」：内存里没有 run 时从 patrol-last.json 兜底', async () => {
+  await withPlugin(async ({ call, dataDir }) => {
+    const runDir = path.join(dataDir, 'run');
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(runDir, 'patrol-last.json'),
+      JSON.stringify({
+        id: 'p_restart1',
+        status: 'done',
+        finishedAt: '2026-10-08T07:00:00.000Z',
+        progress: { draftsCreated: 7 },
+      }),
+      'utf8',
+    );
+    const res = await call('GET', '/patrol');
+    assert.equal(res.payload.data.run, null, '内存里确实没有 run');
+    assert.deepEqual(res.payload.data.lastRun, {
+      id: 'p_restart1',
+      status: 'done',
+      finishedAt: '2026-10-08T07:00:00.000Z',
+      draftsCreated: 7,
+    });
+  });
+});
+
+test('在设置里禁用紫鸟CLI：一次都不调用它，亚马逊渠道回报未启用', async () => {
+  await withPlugin(async ({ call, ctx }) => {
+    const saved = await call('POST', '/settings', { cliEnabled: { ziniao: false } });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.payload.data.settings.cliEnabled.ziniao, false, '开关要落进设置');
+    assert.equal(saved.payload.data.settings.cliEnabled.lark, true, '另一个 CLI 不能被一起抹掉');
+
+    const health = await call('GET', '/health');
+    assert.equal(health.payload.data.clis.ziniao.enabled, false);
+    assert.equal(health.payload.data.clis.ziniao.error, null, '禁用不是故障');
+    assert.equal(health.payload.data.clis.lark.enabled, true);
+
+    // 禁用的 CLI 一次都不该被调用。
+    const before = ctx.spawns.length;
+    const scan = await call('POST', '/patrol/scan', { channels: ['amazon'] });
+    assert.equal(scan.payload.data.amazon.disabled, true);
+    assert.equal(scan.payload.data.amazon.error, null, '未启用不是错误');
+    assert.match(scan.payload.data.amazon.hint, /禁用/);
+    assert.equal(ctx.spawns.length, before, '禁用的渠道不该触发任何子进程');
+
+    const patrol = await call('GET', '/patrol');
+    assert.equal(patrol.payload.data.channels.find((entry) => entry.id === 'amazon').enabled, false);
+
+    // 重新启用后必须恢复。
+    await call('POST', '/settings', { cliEnabled: { ziniao: true } });
+    const back = await call('GET', '/health');
+    assert.equal(back.payload.data.clis.ziniao.enabled, true);
   });
 });
 
@@ -370,5 +433,116 @@ test('巡逻只写草稿：接口表里不存在任何「发送」路由', () =>
   assert.equal(paths.some((entry) => /send|发送/i.test(entry)), false);
   assert.ok(paths.includes('POST /patrol'), '一键巡逻入口');
   assert.ok(paths.includes('POST /drafts/:id/fill'), '人工触发的「填入回复框」入口');
+  assert.ok(paths.includes('DELETE /drafts/:id'), '删除草稿入口');
+});
+test('定时巡检：默认关闭、心跳已装上，改完时刻表状态立刻反映', async () => {
+  await withPlugin(async ({ call }) => {
+    const before = await call('GET', '/health');
+    assert.equal(before.payload.data.autoPatrol.enabled, false, '默认必须是关闭');
+    assert.equal(before.payload.data.autoPatrol.heartbeat, true, '心跳要装上（跑不跑是另一回事）');
+    assert.equal(before.payload.data.autoPatrol.blockedBy, 'disabled');
+    assert.deepEqual(before.payload.data.autoPatrol.times, ['09:00', '14:00', '20:00'], '出厂三档');
+
+    // 挑一个**离现在足够远**的时刻，免得测试把真巡逻启起来（宽限期才 5 分钟）。
+    const nowMinutes = zonedMinutes(new Date(), 'Asia/Shanghai');
+    const slot = formatClock(nowMinutes + 120);
+    const saved = await call('POST', '/settings', {
+      autoPatrol: { enabled: true, times: [slot] },
+    });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.payload.data.settings.autoPatrol.enabled, true);
+
+    const after = await call('GET', '/patrol');
+    const auto = after.payload.data.autoPatrol;
+    assert.equal(auto.enabled, true);
+    assert.deepEqual(auto.times, [slot]);
+    assert.equal(auto.blockedBy, 'not-due', '还没到这个点');
+    assert.equal(auto.wouldRun, false);
+    assert.equal(auto.nextSlot, slot);
+    assert.ok(auto.nextAt, '要给出下次巡检的绝对时间');
+    assert.deepEqual(auto.firedToday, []);
+
+    // 只提交开关时，时刻表不能被抹掉（applySettings 必须是部分合并）。
+    await call('POST', '/settings', { autoPatrol: { enabled: false } });
+    const off = await call('GET', '/patrol');
+    assert.equal(off.payload.data.autoPatrol.blockedBy, 'disabled');
+    assert.deepEqual(off.payload.data.autoPatrol.times, [slot], '时刻表不能被抹掉');
+
+    // 传空数组是有意义的：一次都不巡检。
+    await call('POST', '/settings', { autoPatrol: { enabled: true, times: [] } });
+    const empty = await call('GET', '/patrol');
+    assert.deepEqual(empty.payload.data.autoPatrol.times, []);
+    assert.equal(empty.payload.data.autoPatrol.blockedBy, 'no-times');
+    assert.equal(empty.payload.data.autoPatrol.nextAt, null);
+  });
+});
+
+test('删除草稿：真删（不是标记丢弃），并清掉工单上的草稿指针', async () => {
+  await withPlugin(async ({ call, dataDir }) => {
+    const draftsDir = path.join(dataDir, 'drafts');
+    fs.mkdirSync(draftsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(draftsDir, 'drafts.json'),
+      JSON.stringify({
+        version: 1,
+        rev: 3,
+        items: [
+          {
+            id: 'd_gone',
+            platform: 'amazon',
+            storeId: 's1',
+            storeName: 'Amazon-X',
+            buyer: 'ann',
+            status: 'draft',
+            body: 'hi',
+            // 草稿库与工单队列互指：删除时要顺着这个指针把工单上的引用清掉。
+            ticketId: 'q_1',
+            timeline: [],
+          },
+        ],
+      }),
+      'utf8',
+    );
+    fs.writeFileSync(path.join(draftsDir, 'd_gone.txt'), '正文副本', 'utf8');
+    fs.writeFileSync(
+      path.join(dataDir, 'queue.json'),
+      JSON.stringify({
+        version: 1,
+        rev: 1,
+        items: [
+          {
+            id: 'q_1',
+            channel: 'amazon',
+            kind: 'message',
+            status: 'drafted',
+            subject: 's',
+            receivedAt: '2026-10-08T00:00:00.000Z',
+            draftId: 'd_gone',
+            timeline: [],
+          },
+        ],
+      }),
+      'utf8',
+    );
+    assert.equal((await call('GET', '/drafts')).payload.data.total, 1, '先确认测试数据进去了');
+
+    const noToken = await call('DELETE', '/drafts/d_gone', undefined, { withToken: false });
+    assert.equal(noToken.status, 403, '删除是写操作，要令牌');
+
+    const missing = await call('DELETE', '/drafts/d_nope');
+    assert.equal(missing.status, 404);
+
+    const gone = await call('DELETE', '/drafts/d_gone');
+    assert.equal(gone.status, 200);
+    assert.equal(gone.payload.data.deleted, true);
+    assert.equal(gone.payload.data.ticketId, 'q_1', '要把关联的工单 id 回给界面');
+
+    assert.equal((await call('GET', '/drafts')).payload.data.total, 0, '要从库里真的没了');
+    assert.equal(fs.existsSync(path.join(draftsDir, 'd_gone.txt')), false, '正文副本也要清掉');
+
+    const ticket = await call('GET', '/queue/q_1');
+    assert.equal(ticket.payload.data.item.draftId, null, '工单上的草稿指针要清掉');
+    assert.equal(ticket.payload.data.item.status, 'drafted', '删草稿不改工单状态，那是另一件事');
+  });
 });
 
