@@ -82,6 +82,22 @@ function trendChart(series, defs) {
   const groupW = (W - pad.l - pad.r) / series.length;
   const barW = Math.max(3, Math.min(12, (groupW - 8) / defs.length));
 
+  // 横轴标签按**像素间距**布点（不是「每 N 个画一个」）：窄图里相邻两天的字会叠在一起，
+  // 而最后一天又必须出现 —— 挤不下时让前一个标签让位。
+  const MIN_LABEL_GAP = 44;
+  const ticks = [];
+  series.forEach((row, index) => {
+    const x = pad.l + index * groupW + groupW / 2;
+    if (ticks.length === 0 || x - ticks[ticks.length - 1].x >= MIN_LABEL_GAP) ticks.push({ index, x });
+  });
+  const lastIndex = series.length - 1;
+  if (ticks.length > 0 && ticks[ticks.length - 1].index !== lastIndex) {
+    const x = pad.l + lastIndex * groupW + groupW / 2;
+    if (x - ticks[ticks.length - 1].x < MIN_LABEL_GAP) ticks.pop();
+    ticks.push({ index: lastIndex, x });
+  }
+  const tickIndexes = new Set(ticks.map((tick) => tick.index));
+
   const children = [];
   // 基线
   children.push(svgNode('line', { x1: pad.l, y1: H - pad.b, x2: W - pad.r, y2: H - pad.b, class: 'chart-axis' }));
@@ -110,8 +126,7 @@ function trendChart(series, defs) {
         );
       }
     });
-    // 横轴标签：只在稀疏位置显示，避免挤在一起
-    if (series.length <= 10 || index % Math.ceil(series.length / 8) === 0 || index === series.length - 1) {
+    if (tickIndexes.has(index)) {
       children.push(
         svgNode('text', {
           x: pad.l + index * groupW + groupW / 2,
@@ -216,37 +231,39 @@ function runtimeSection(runtime) {
     kpi('连续失败', num(runtime.detect.consecutiveFail), '', runtime.detect.consecutiveFail > 0 ? 'error' : ''),
   ]);
 
-  const cliTable = node('table', { class: 'table' }, [
-    node('thead', {}, [
-      node('tr', {}, [
-        node('th', { text: 'CLI' }),
-        node('th', { text: '调用' }),
-        node('th', { text: '成功' }),
-        node('th', { text: '失败' }),
-        node('th', { text: '成功率' }),
-        node('th', { text: 'P50' }),
-        node('th', { text: 'P95' }),
-        node('th', { text: '最近' }),
+  const cliTable = node('div', { class: 'table-wrap' }, [
+    node('table', { class: 'table' }, [
+      node('thead', {}, [
+        node('tr', {}, [
+          node('th', { text: 'CLI' }),
+          node('th', { text: '调用' }),
+          node('th', { text: '成功' }),
+          node('th', { text: '失败' }),
+          node('th', { text: '成功率' }),
+          node('th', { text: 'P50' }),
+          node('th', { text: 'P95' }),
+          node('th', { text: '最近' }),
+        ]),
       ]),
+      node(
+        'tbody',
+        {},
+        cli.byName.length === 0
+          ? [node('tr', {}, [node('td', { colspan: '8', class: 'muted', text: '还没有调用记录' })])]
+          : cli.byName.map((entry) =>
+              node('tr', {}, [
+                node('td', { text: entry.name }),
+                node('td', { text: num(entry.total) }),
+                node('td', { text: num(entry.ok) }),
+                node('td', { text: num(entry.fail) }),
+                node('td', { text: pct(entry.successRate) }),
+                node('td', { text: ms(entry.p50) }),
+                node('td', { text: ms(entry.p95) }),
+                node('td', { class: 'muted', text: entry.lastAt ? entry.lastAt.slice(11, 19) : DASH }),
+              ]),
+            ),
+      ),
     ]),
-    node(
-      'tbody',
-      {},
-      cli.byName.length === 0
-        ? [node('tr', {}, [node('td', { colspan: '8', class: 'muted', text: '还没有调用记录' })])]
-        : cli.byName.map((entry) =>
-            node('tr', {}, [
-              node('td', { text: entry.name }),
-              node('td', { text: num(entry.total) }),
-              node('td', { text: num(entry.ok) }),
-              node('td', { text: num(entry.fail) }),
-              node('td', { text: pct(entry.successRate) }),
-              node('td', { text: ms(entry.p50) }),
-              node('td', { text: ms(entry.p95) }),
-              node('td', { class: 'muted', text: entry.lastAt ? entry.lastAt.slice(11, 19) : DASH }),
-            ]),
-          ),
-    ),
   ]);
 
   return panel('插件运行', null, [

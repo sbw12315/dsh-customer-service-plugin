@@ -195,34 +195,41 @@ function table() {
     ]);
   }
   const rows = state.items.map((item) => {
-    const sla = slaCountdown(item.slaDueAt ?? item.dueAt ?? null);
+    const due = item.slaDueAt ?? item.dueAt ?? null;
+    const sla = slaCountdown(due);
+    // 整行提示条只留给「明确需人工」和「超时一天以上」：25 行里 22 行都超时的时候，
+    // 满屏橙线等于没有信号；SLA 列本身仍然逐行标红，细粒度没有丢。
+    const overdueHours = due ? (Date.now() - new Date(due).getTime()) / 3_600_000 : 0;
+    const alert = item.status === 'needs_human' || overdueHours > 24;
     return node(
       'tr',
-      { class: item.status === 'needs_human' || sla.overdue ? 'row-alert' : '', onclick: () => openDrawer(item.id) },
+      { class: alert ? 'row-alert' : '', onclick: () => openDrawer(item.id) },
       [
         node('td', {}, [badge(label(STATUS_LABEL, item.status), STATUS_TONE[item.status] ?? 'idle')]),
         node('td', { text: label(CHANNEL_LABEL, item.channel) }),
         node('td', { text: label(KIND_LABEL, item.kind) }),
-        node('td', { class: 'cell-subject', text: item.subject }),
+        node('td', { class: 'cell-subject', text: item.subject, title: item.subject }),
         node('td', { text: item.assignee ?? '未分派' }),
         node('td', { class: 'muted', text: relative(item.receivedAt) }),
         node('td', { class: sla.overdue ? 'cell-overdue' : 'muted', text: sla.unknown ? DASH : sla.text }),
       ],
     );
   });
-  return node('table', { class: 'table table-clickable' }, [
-    node('thead', {}, [
-      node('tr', {}, [
-        node('th', { text: '状态' }),
-        node('th', { text: '渠道' }),
-        node('th', { text: '类型' }),
-        node('th', { text: '主题' }),
-        node('th', { text: '负责人' }),
-        node('th', { text: '收到' }),
-        node('th', { text: 'SLA' }),
+  return node('div', { class: 'table-wrap' }, [
+    node('table', { class: 'table table-clickable' }, [
+      node('thead', {}, [
+        node('tr', {}, [
+          node('th', { text: '状态' }),
+          node('th', { text: '渠道' }),
+          node('th', { text: '类型' }),
+          node('th', { text: '主题' }),
+          node('th', { text: '负责人' }),
+          node('th', { text: '收到' }),
+          node('th', { text: 'SLA' }),
+        ]),
       ]),
+      node('tbody', {}, rows),
     ]),
-    node('tbody', {}, rows),
   ]);
 }
 

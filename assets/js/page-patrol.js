@@ -702,20 +702,22 @@ function renderProgress() {
       ]),
     );
     container.appendChild(
-      node('table', { class: 'table' }, [
-        node('thead', {}, [
-          node('tr', {}, [
-            node('th', { text: '渠道' }),
-            node('th', { text: '目标' }),
-            node('th', { text: '结果' }),
-            node('th', { text: '待回复' }),
-            node('th', { text: '草稿' }),
-            node('th', { text: '已跳过' }),
-            node('th', { text: '耗时' }),
-            node('th', { text: '错误' }),
+      node('div', { class: 'table-wrap' }, [
+        node('table', { class: 'table' }, [
+          node('thead', {}, [
+            node('tr', {}, [
+              node('th', { text: '渠道' }),
+              node('th', { text: '目标' }),
+              node('th', { text: '结果' }),
+              node('th', { text: '待回复' }),
+              node('th', { text: '草稿' }),
+              node('th', { text: '已跳过' }),
+              node('th', { text: '耗时' }),
+              node('th', { text: '错误' }),
+            ]),
           ]),
+          node('tbody', {}, rows),
         ]),
-        node('tbody', {}, rows),
       ]),
     );
   }
@@ -894,7 +896,7 @@ function renderDrafts() {
       node('td', { text: item.storeName || item.storeId }),
       node('td', { text: item.buyer || DASH }),
       node('td', { text: item.intentLabel || intentLabel(item.intent) }),
-      node('td', { class: 'cell-subject', text: item.subject || DASH }),
+      node('td', { class: 'cell-subject', text: item.subject || DASH, title: item.subject || DASH }),
       node('td', { text: item.orderId || DASH }),
       node('td', { class: 'muted', text: item.dueText || DASH }),
       node('td', { class: item.needsHuman ? 'cell-overdue' : 'muted', text: item.needsHuman ? '需确认' : '' }),
@@ -915,21 +917,23 @@ function renderDrafts() {
   });
 
   container.appendChild(
-    node('table', { class: 'table table-clickable' }, [
-      node('thead', {}, [
-        node('tr', {}, [
-          node('th', { text: '状态' }),
-          node('th', { text: '店铺' }),
-          node('th', { text: '买家' }),
-          node('th', { text: '意图' }),
-          node('th', { text: '主题' }),
-          node('th', { text: '订单号' }),
-          node('th', { text: '到期' }),
-          node('th', { text: '需确认' }),
-          node('th', { text: '操作' }),
+    node('div', { class: 'table-wrap' }, [
+      node('table', { class: 'table table-clickable' }, [
+        node('thead', {}, [
+          node('tr', {}, [
+            node('th', { text: '状态' }),
+            node('th', { text: '店铺' }),
+            node('th', { text: '买家' }),
+            node('th', { text: '意图' }),
+            node('th', { text: '主题' }),
+            node('th', { text: '订单号' }),
+            node('th', { text: '到期' }),
+            node('th', { text: '需确认' }),
+            node('th', { text: '操作' }),
+          ]),
         ]),
+        node('tbody', {}, rows),
       ]),
-      node('tbody', {}, rows),
     ]),
   );
 }

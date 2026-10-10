@@ -292,6 +292,22 @@ settings.json :  $DSH_CS_DIR                       （若设置）
 「设置」承载配置，「工作台」承载日常操作。飞书邮件同步、规则引擎、草稿生成落地后，
 它们的数据会直接进队列，**统计页不用改**。
 
+### 视觉与样式
+
+界面只有一份样式表 `assets/app.css`，按「设计令牌 → 组件」两层组织，零构建、零依赖：
+
+- **配色**：`--cs-*` 令牌分 `:root`（明色）与 `:root[data-theme="dark"]`（暗色）两套；没带主题参数时
+  跟随 `prefers-color-scheme`。外壳（`lib/client.js`）把宿主的明/暗结论用 `?theme=light|dark` 传给页面，
+  `assets/index.html` 头部的引导脚本把它落到 `<html data-theme>` —— 排在样式表之前是为了暗色下不闪白。
+- **可读性**：正文 / 次级文字 / 语义色（成功、警告、危险）按 11~12px 小字的 4.5:1 取值；输入框、下拉、
+  开关另用一档更实的描边（`--cs-control-border`），保证控件边界看得清。
+- **组件**：按钮（默认 / 主要 / 幽灵 / 危险 / xs / xl）、状态徽章（带色点）、滑杆式开关、
+  表格（`.table-wrap` 圆角 + 窄屏横滑 + 首列钉住）、抽屉（`clip-path` + 超大投影当遮罩，不额外插 DOM）、
+  空状态、轻提示、KPI 卡、分布条、纯 SVG 图表。
+- **窄屏**：DSH 侧栏里的 iframe 只有 460px 左右，所以断点定在 700 / 640px：顶栏折行、表单单列、
+  表格横向滚动且状态列 sticky、行内边距收紧。
+- 尊重 `prefers-reduced-motion`，焦点态统一用 `:focus-visible` 外描边。
+
 ## 接口
 
 | 方法 | 路径 | 说明 |
@@ -352,7 +368,7 @@ lib/clilocator.js     CLI 定位：设置 → 环境变量 → PATH → 常见�
 lib/settings.js       设置读写（原子写）与数据目录骨架
 lib/paths.js          $DSH_HOME / profile 推导，零本机绝对路径
 assets/index.html     两级导航骨架
-assets/app.css        样式（含 KPI、分布条、SVG 图表、表格、抽屉）
+assets/app.css        设计令牌 + 全部组件（按钮/徽章/开关/表格/抽屉/KPI/图表，明暗两套）
 assets/js/*.js        控制台前端：原生 ESM，零构建（main/dom/api/format + 四个页面）
 assets/playbooks/     出厂平台剧本模板（Amazon / TikTok / Walmart）
 scripts/*.mjs         不依赖 DSH 的自检与实跑脚本（见「开发」）
