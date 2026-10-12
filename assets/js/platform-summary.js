@@ -72,3 +72,30 @@ export function unpatrolledPlatforms(channels, scans) {
     covered: [...covered].sort(),
   };
 }
+
+/**
+ * 本账号**一家店都没有**的渠道 —— 巡逻页据此把用不到的平台块收起来。
+ *
+ * 判据只用两个字段：
+ *   - `scan.total`：**全账号**店铺数（适配器的 listAllStores 不过滤平台，各渠道拿到的是同一份）；
+ *   - `scan.items`：本渠道认出来的可用目标数（已排除停用店）。
+ * 刻意**不看 skipped** —— 那是「别人的店」，跟本渠道有没有店无关。
+ * @param {Array<object>} channels - 渠道清单（含 id / label / kind / enabled）。
+ * @param {Record<string, object>} scans - 渠道 id → 扫描结果。
+ * @returns {Array<{id: string, label: string}>} 可以收起的渠道，顺序同 channels。
+ */
+export function channelsWithoutStores(channels, scans) {
+  const hidden = [];
+  for (const channel of channels ?? []) {
+    const scan = scans?.[channel.id];
+    if (!scan) continue;
+    if ((channel.kind ?? 'store') !== 'store') continue;
+    if (channel.enabled === false) continue;
+    if (scan.error || scan.disabled) continue;
+    if (!(Number(scan.total) > 0)) continue;
+    if ((scan.items ?? []).length > 0) continue;
+    if ((scan.retired ?? []).length > 0) continue;
+    hidden.push({ id: channel.id, label: channel.label });
+  }
+  return hidden;
+}

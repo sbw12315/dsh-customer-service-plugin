@@ -14,7 +14,7 @@
 import { del, get, patch, post, toQuery } from './api.js';
 import { badge, button, clear, copy, input, node, panel, select, toast } from './dom.js';
 import { DASH, dateTime, num } from './format.js';
-import { groupByPlatform, unpatrolledPlatforms } from './platform-summary.js';
+import { channelsWithoutStores, groupByPlatform, unpatrolledPlatforms } from './platform-summary.js';
 
 const STATUS_LABEL = { draft: '草稿', approved: '已批准', filled: '已填入回复框', discarded: '已丢弃' };
 const STATUS_TONE = { draft: 'idle', approved: 'ok', filled: 'warn', discarded: 'idle' };
@@ -108,6 +108,41 @@ function toggleCollapsed(channelId) {
   renderSources();
 }
 
+/**
+ * 「显示本账号没有店铺的渠道」这个开关存哪儿。
+ *
+ * 存 localStorage 而不是 settings：这是**每个操作员自己**的查看偏好（新同事看不到 TEMU 店，
+ * 就不必看见 TEMU 那一块），跟店铺、时刻表那种要跨人共享的配置是两回事 ——
+ * 写进 settings 反而会变成「我把别人的界面改了」。
+ */
+const SHOW_EMPTY_KEY = 'cs.patrol.showEmptyChannels';
+
+/** @returns {boolean} 是否显示「本账号没有店铺的渠道」。 */
+function readShowEmptyChannels() {
+  try {
+    return localStorage.getItem(SHOW_EMPTY_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** @param {boolean} on - 是否显示。 */
+function writeShowEmptyChannels(on) {
+  try {
+    if (on) localStorage.setItem(SHOW_EMPTY_KEY, '1');
+    else localStorage.removeItem(SHOW_EMPTY_KEY);
+  } catch {
+    /* 存不下就算了：不影响任何功能，只影响下次打开时的默认。 */
+  }
+}
+
+/** 切换「显示本账号没有店铺的渠道」，并立刻重画。 */
+function toggleShowEmptyChannels() {
+  state.showEmptyChannels = !state.showEmptyChannels;
+  writeShowEmptyChannels(state.showEmptyChannels);
+  renderSources();
+}
+
 const state = {
   meta: null,
   patrol: null,
@@ -129,6 +164,8 @@ const state = {
   drawer: null,
   /** 已收起的平台块（渠道 id）。见 readCollapsed / toggleCollapsed。 */
   collapsed: readCollapsed(),
+  /** 是否显示「本账号没有店铺的渠道」（默认收起）。见 readShowEmptyChannels。 */
+  showEmptyChannels: readShowEmptyChannels(),
   // ── 登录（前端这一份状态） ────────────────────────────────────────────
   // 与 state.patrol.loginStates（服务端快照）刻意分开存。巡逻每 3 秒整份换掉服务端快照，
   // 把「等待中」「刚点过」这些纯界面标记挂在快照上，一个刷新周期就被抹平，
@@ -667,8 +704,9 @@ function renderOneClick() {
   const run = state.patrol?.run;
   const scans = state.patrol?.sources ?? {};
   const total = Object.values(scans).reduce((sum, scan) => sum + (scan.items?.length ?? 0), 0);
-  const breakdown = (state.patrol?.channels ?? [])
-    .map((channel) => `${channel.label} ${scans[channel.id]?.items?.length ?? 0}`)
+  // 被收起的渠道不进这行摘要：它们的目标数本来就是 0，列出来只会让人以为「TEMU 没扫到」。
+  const breakdown = visibleChannels()
+    .map((channel) => channel.label + ' ' + (scans[channel.id]?.items?.length ?? 0))
     .join(' · ');
 
   container.appendChild(
@@ -1218,6 +1256,28 @@ async function toggleChannel(channel, enabled) {
   }
 }
 
+/**
+ * 本账号没有店铺、因而默认收起的渠道（按**当前扫描结果**算，判据见 channelsWithoutStores）。
+ * @returns {Array<{id: string, label: string}>} 可以收起的渠道。
+ */
+function hiddenChannels() {
+  return channelsWithoutStores(state.patrol?.channels ?? [], state.patrol?.sources ?? {});
+}
+
+/**
+ * 这一屏实际要画哪些渠道。
+ *
+ * 默认把「本账号没有店铺的渠道」收起来：渠道清单是插件写死的，紫鸟却只返回**这个账号
+ * 被授权的**店铺 —— 没有 TEMU 店的同事不该看到「TEMU（0）」那块。
+ * @returns {Array<object>} 渠道清单。
+ */
+function visibleChannels() {
+  const channels = state.patrol?.channels ?? [];
+  if (state.showEmptyChannels) return channels;
+  const hidden = new Set(hiddenChannels().map((entry) => entry.id));
+  return channels.filter((channel) => !hidden.has(channel.id));
+}
+
 /** 渲染每个渠道一块：标题 + 重新扫描 + 提示 + 目标勾选。 */
 function renderSources() {
   const container = document.getElementById('patrol-sources');
@@ -1230,6 +1290,10 @@ function renderSources() {
     container.appendChild(node('div', { class: 'muted', text: '没有已注册的巡逻渠道。' }));
     return;
   }
+
+  // 本账号没有店铺的渠道默认收起（判据见 channelsWithoutStores）。
+  const hideable = hiddenChannels();
+  const visible = visibleChannels();
 
   // 定时巡检（每个平台一份）：先把本地草稿备好，再往每个平台块里画。
   // 判据是**有没有 channels**：旧后端的 autoPatrol 还是 { enabled, times }，字段名都在、
@@ -1277,7 +1341,32 @@ function renderSources() {
     );
   }
 
-  for (const channel of channels) {
+  // 被收起的渠道要说一声、并留一个「显示」的口子：渠道不该因为「这个账号没店」而变得
+  // 不可达 —— 在紫鸟里加了店、点一次「仅刷新列表」，它自己就会回到列表里。
+  if (hideable.length > 0) {
+    container.appendChild(
+      node('div', { class: 'sources-summary' }, [
+        node('div', { class: 'muted' }, [
+          node('span', {
+            text: state.showEmptyChannels
+              ? '已显示全部渠道，其中本账号没有店铺的是：'
+              : '已收起 ' + hideable.length + ' 个本账号没有店铺的渠道：',
+          }),
+          node('strong', { text: hideable.map((entry) => entry.label).join('、') }),
+        ]),
+        node('button', {
+          type: 'button',
+          class: 'btn btn-ghost',
+          text: state.showEmptyChannels ? '收起这些渠道' : '显示这些渠道',
+          title: '判据是紫鸟返回的店铺列表：这个账号在这些渠道下一家店都没有。'
+            + '在紫鸟里加了店再点一次「仅刷新列表」，对应渠道会自动回来。',
+          onclick: () => toggleShowEmptyChannels(),
+        }),
+      ]),
+    );
+  }
+
+  for (const channel of visible) {
     const scan = scans[channel.id] ?? { items: [] };
     const list = scan.items ?? [];
     const off = channel.enabled === false;

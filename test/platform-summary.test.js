@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { groupByPlatform, unpatrolledPlatforms } from '../assets/js/platform-summary.js';
+import {
+  channelsWithoutStores,
+  groupByPlatform,
+  unpatrolledPlatforms,
+} from '../assets/js/platform-summary.js';
 
 /** 造一份像真实 /patrol 的 channels + sources。 */
 function fixture() {
@@ -94,4 +98,75 @@ test('真实账号口径：亚马逊 skipped 里的平台数 > 真正没人巡�
   assert.equal(perChannel, 2, 'amazon 的 skipped 涉及 TikTok + SHEIN');
   assert.equal(global, 1, '真正没人巡逻的只有 SHEIN');
   assert.notEqual(perChannel, global, '两个口径必须不同 —— 混用就是这次要修的那个错');
+});
+
+/* ── 按紫鸟扫描结果收起「本账号没有店铺」的渠道 ─────────────────────────────── */
+
+/**
+ * 造一个「有亚马逊 / TikTok 店，没有沃尔玛 / SHEIN / TEMU 店」的账号。
+ * total 是**全账号**店铺数（每个渠道拿到的都是同一份），items 才是本渠道的目标。
+ */
+function accountFixture() {
+  const channels = [
+    { id: 'amazon', label: '亚马逊', kind: 'store', enabled: true },
+    { id: 'tiktok', label: 'TikTok Shop', kind: 'store', enabled: true },
+    { id: 'walmart', label: '沃尔玛', kind: 'store', enabled: true },
+    { id: 'shein', label: 'SHEIN', kind: 'store', enabled: true },
+    { id: 'temu', label: 'TEMU', kind: 'store', enabled: true },
+    { id: 'lark-mail', label: '飞书邮箱', kind: 'mailbox', enabled: true },
+  ];
+  const scans = {
+    amazon: { total: 5, items: [{ storeId: 'a1' }, { storeId: 'a2' }, { storeId: 'a3' }], retired: [] },
+    tiktok: { total: 5, items: [{ storeId: 't1' }, { storeId: 't2' }], retired: [] },
+    walmart: { total: 5, items: [], retired: [] },
+    shein: { total: 5, items: [], retired: [] },
+    temu: { total: 5, items: [], retired: [] },
+    'lark-mail': { total: 0, items: [{ storeId: 'me@x.com' }], retired: [] },
+  };
+  return { channels, scans };
+}
+
+test('channelsWithoutStores：这个账号没有 TEMU / SHEIN / 沃尔玛店，就收起这三块', () => {
+  const { channels, scans } = accountFixture();
+  assert.deepEqual(channelsWithoutStores(channels, scans).map((entry) => entry.id), ['walmart', 'shein', 'temu']);
+});
+
+test('channelsWithoutStores：有店的渠道与邮箱渠道都不收起', () => {
+  const { channels, scans } = accountFixture();
+  const hidden = channelsWithoutStores(channels, scans).map((entry) => entry.id);
+  assert.equal(hidden.includes('amazon'), false, '有 3 家亚马逊店');
+  assert.equal(hidden.includes('tiktok'), false, '有 2 家 TikTok 店');
+  assert.equal(hidden.includes('lark-mail'), false, '邮箱没有「店铺」概念，能不能用由邮箱配置决定');
+});
+
+test('channelsWithoutStores：扫描失败 / 渠道未启用时不猜，一律不收起', () => {
+  const { channels, scans } = accountFixture();
+  // 扫描失败：items 空是「没读到」，不是「没有店」——猜错的代价是把能用的渠道藏起来。
+  const failed = { ...scans, temu: { total: 5, items: [], retired: [], error: { message: '未登录' } } };
+  assert.deepEqual(channelsWithoutStores(channels, failed).map((entry) => entry.id), ['walmart', 'shein']);
+
+  // 渠道被停用：那一块里挂着渠道自己的启停开关，收起就再也打不开。
+  const disabled = channels.map((channel) => (channel.id === 'walmart' ? { ...channel, enabled: false } : channel));
+  assert.deepEqual(channelsWithoutStores(disabled, scans).map((entry) => entry.id), ['shein', 'temu']);
+});
+
+test('channelsWithoutStores：全账号一家店都没扫到就什么都不收起（否则整页会空掉）', () => {
+  const { channels } = accountFixture();
+  const empty = {};
+  for (const channel of channels) empty[channel.id] = { total: 0, items: [], retired: [] };
+  assert.deepEqual(channelsWithoutStores(channels, empty), []);
+});
+
+test('channelsWithoutStores：0 家可用是因为店都停用了 —— 留着那一栏解释给人看', () => {
+  const { channels, scans } = accountFixture();
+  const withRetired = { ...scans, temu: { total: 5, items: [], retired: [{ storeId: 't9' }] } };
+  assert.equal(channelsWithoutStores(channels, withRetired).some((entry) => entry.id === 'temu'), false);
+});
+
+test('channelsWithoutStores：没扫过的渠道不收起，空输入安全', () => {
+  const channels = [{ id: 'temu', label: 'TEMU', kind: 'store', enabled: true }];
+  assert.deepEqual(channelsWithoutStores(channels, {}), []);
+  assert.deepEqual(channelsWithoutStores(channels, { temu: { total: 5, items: [{ storeId: 'x' }] } }), []);
+  assert.deepEqual(channelsWithoutStores(null, null), []);
+  assert.deepEqual(channelsWithoutStores(undefined, undefined), []);
 });

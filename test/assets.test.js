@@ -137,6 +137,18 @@ test('定时巡检已经下沉到每个平台块里，页面顶层不再有独�
   assert.match(text, /storeIds/, '要能选这个平台只巡检哪几家');
 });
 
+test('巡逻页按「本账号的紫鸟店铺列表」收起没有店铺的渠道', () => {
+  const text = fs.readFileSync(path.join(ASSETS, 'js', 'page-patrol.js'), 'utf8');
+  // 判据抽成纯函数（test/platform-summary.test.js 单独断言），页面只负责用它。
+  assert.match(text, /channelsWithoutStores/, '要按扫描结果算哪些渠道没有店铺');
+  assert.match(text, /function visibleChannels\(\)/, '要有「这一屏画哪些渠道」的唯一出口');
+  // 渲染循环必须走这份清单：改回遍历全部渠道，就等于这个功能没生效。
+  assert.match(text, /for \(const channel of visible\) \{/, '渠道块循环要用可见清单');
+  // 收起了就要能再打开，并且这个偏好按浏览器存（不进 settings，免得「我把别人的界面改了」）。
+  assert.match(text, /showEmptyChannels/, '要能切回「显示本账号没有店铺的渠道」');
+  assert.match(text, /cs\.patrol\.showEmptyChannels/, '偏好存 localStorage');
+});
+
 test('巡逻页每个平台块都画一枚启用/停用开关，且旧后端下不画死开关', () => {
   const text = fs.readFileSync(path.join(ASSETS, 'js', 'page-patrol.js'), 'utf8');
   // 开关本体：写进 settings.channelEnabled，走 POST /settings 立即生效。
