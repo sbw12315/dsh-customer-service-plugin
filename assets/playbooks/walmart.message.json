@@ -1,50 +1,246 @@
 {
   "id": "walmart.message",
   "platform": "walmart",
-  "platformLabel": "Walmart Seller Center",
+  "platformLabel": "Walmart Seller Center（沃尔玛卖家中心）",
   "capability": "message",
   "capabilityLabel": "买家消息 / 站内信",
-  "verified": false,
-  "note": "出厂模板，选择器全部为空且未校准。必须先在控制台的「校准模式」里对着真实店铺点选回填，并把 submit.verified 置为 true，发送按钮才会解锁。",
+  "verified": true,
+  "note": "【已校准 · 2026-10-10】读取链路在真实店铺 Walmart-Yanosaku二店-管理员（storeId 27470279549745）上校准：登录后进入 Customer 收件箱，实机 25 条会话，列表 / 会话正文 / 方向判据 / 回复框全部跑通。发送链路 submit 永久 verified=false、never=true —— 本插件只生成草稿，人工点发送。",
+  "calibration": {
+    "state": "verified",
+    "verifiedAt": "2026-10-10",
+    "verifiedStore": "Walmart-Yanosaku二店-管理员（storeId 27470279549745，沃尔玛-全球）",
+    "firstVerifiedAt": "2026-09-30",
+    "firstVerifiedStore": "Walmart-Cozynome-管理员（storeId 27800343767219）",
+    "verified": [
+      "入口 https://seller.walmart.com/seller-communication/Customer（标题 Inbox | Walmart Seller Center）",
+      "会话行 div.message.p-16（实机 25 条，可点击）",
+      "会话正文栏 div.relative.h-full.flex.flex-col.justify-between.w-full（实机唯一命中 1 个）",
+      "消息区 div.overflow-auto.flex-1.p-24.py-0；消息 = 其中的 div.my-16（hr 分隔线不算）",
+      "消息方向 = 投递状态：我方消息 meta 行带「Delivered」节点，买家消息没有（实机两条 x/宽度完全相同，几何不可用）",
+      "回复框 = 回复区 div.relative.p-24.pt-8.flex.flex-col.gap-16 里的 textarea（没有 placeholder 属性）",
+      "发送按钮存在，文案「发送回复」—— 只记文案，不取选择器，永不点击",
+      "未登录判据：入口 302 到 login.account.wal-mart.com/authorize?...&clientType=seller",
+      "回复区含「选择消息模板」下拉与附件按钮（本插件不使用，只记录）",
+      "2026-10-10 交叉验证：Walmart-Cozynome-管理员（9 条会话）上同一套选择器全部命中",
+      "自动登录链路：登录页点「登录」、2 步验证页（等紫鸟填码后）点「继续」，2026-10-10 在两店实机走通"
+    ],
+    "pending": [
+      "会话级深链：实测**不存在**（点开不同会话地址恒为 /seller-communication/Customer?start=1），conversationUrl 恒返回空串",
+      "列表容器是 CSR 哈希类名（Hiyc8），随构建变 —— 脚本因此不强依赖容器，直接找行 .message.p-16",
+      "系统通知类消息与买家消息目前都按「非我方」处理（没有系统消息的独立判据）",
+      "附件、模板下拉、改单等交互未涉及",
+      "右侧「消费者 + 订单详情」面板只在部分店出现（Cozynome 有 / Yanosaku二店 没有）：金额、承运人、追踪号、SKU、买家地址都能读到，但**尚未接入提取**（接入时必须 best-effort）"
+    ],
+    "howTo": [
+      "① 在紫鸟里打开该店并完成沃尔玛 SSO 登录（插件不代劳登录，也不碰验证码）",
+      "② node scripts/smoke-walmart.mjs --store=<storeId>：打印候选选择器命中数 + 适配器实跑结果",
+      "③ 若页面改版：命中 1 个以上的候选提到数组第一位，更新 lib/platforms/walmart.js 与本文件的 verified"
+    ],
+    "crossVerifiedAt": "2026-10-10",
+    "crossVerifiedStore": "Walmart-Cozynome-管理员（storeId 27800343767219，沃尔玛-全球）",
+    "crossVerifiedResult": "第二家店实机 9 条会话：行选择器、会话正文栏、消息选择器、方向判据、回复框**全部命中**（同一套选择器，无需按店调整）；同时发现 Cozynome 店多一栏「消费者 + 订单详情」（二店没有），结构已记入 context.order"
+  },
   "entry": {
-    "url": "",
-    "storeOpen": true
+    "url": "https://seller.walmart.com/seller-communication/Customer",
+    "caseUrlTemplate": "",
+    "caseUrlNote": "本平台**实测没有**会话级深链：点开不同会话地址恒为 ?start=1，因此恒返回空串，界面据此隐藏「打开原会话」。",
+    "storeOpen": true,
+    "loginUrlPattern": "login.account.wal-mart.com/authorize 或 seller.walmart.com/**/login|signin",
+    "signedInTitle": "Inbox | Walmart Seller Center"
   },
   "list": {
-    "waitFor": { "op": "waitElement", "selector": "", "timeoutMs": 20000 },
-    "items": { "selector": "", "unreadSelector": "", "refAttr": "" },
+    "selector": "",
+    "selectorNote": "列表容器**没有可依赖的语义化选择器**（实机是 CSR 哈希类名 Hiyc8）：脚本先直接找行，容器只作为回显。",
+    "containerSelectors": [
+      "[class*=\"message-list\"]",
+      "[class*=\"messageList\"]",
+      "[data-testid*=\"message-list\"]",
+      "[class*=\"conversation-list\"]",
+      "main [role=\"list\"]"
+    ],
+    "waitFor": {
+      "op": "waitElement",
+      "selector": ".message.p-16",
+      "timeoutMs": 30000,
+      "note": "等的是实测过的行，不是猜出来的容器。"
+    },
+    "items": {
+      "selector": ".message.p-16",
+      "selectorNote": "实测：div.message.p-16（25 条）。⚠️ 裸 .message 在本平台是**列表行**的类名，不能当消息元素用。",
+      "rowSelectors": [
+        ".message.p-16",
+        "[class*=\"message-row\"]",
+        "[class*=\"messageRow\"]",
+        "[class*=\"message-item\"]",
+        "[role=\"row\"]",
+        "[role=\"listitem\"]"
+      ],
+      "unreadSelector": "",
+      "orderIdAttr": "",
+      "refAttr": "",
+      "clickBy": "index",
+      "clickByNote": "按数组下标点击（脚本内 querySelectorAll 后取 index），不用 :nth-of-type —— 行之间夹着占位元素时会点错行。"
+    },
     "extract": {
       "from": "",
+      "date": "",
+      "country": "",
       "subject": "",
-      "snippet": "",
-      "url": ""
+      "due": "",
+      "note": "列表行没有独立字段节点：按「首行是买家 / 次行起是摘要」保守解析并带上整行原文；行里能看到「需要答复」「40 小时」这类角标，dueMinutes 从整行文本解析。"
     }
   },
   "read": {
+    "selector": "div.relative.h-full.flex.flex-col.justify-between.w-full",
+    "threadSelectors": [
+      "div.relative.h-full.flex.flex-col.justify-between.w-full",
+      "[class*=\"conversation-detail\"]",
+      "main section"
+    ],
+    "messageContainerSelectors": [
+      "div.overflow-auto.flex-1.p-24.py-0",
+      "[class*=\"message-list\"]"
+    ],
+    "messageSelectors": [
+      "div.overflow-auto.flex-1.p-24.py-0 > div.my-16",
+      "div.overflow-auto.flex-1.p-24.py-0 > div"
+    ],
     "steps": [
-      { "op": "click", "ref": "{{itemRef}}" },
-      { "op": "waitElement", "selector": "", "timeoutMs": 20000 }
+      {
+        "op": "click",
+        "selector": ".message.p-16",
+        "note": "按数组下标点击（适配器用 clickScriptByIndex 实现）"
+      },
+      {
+        "op": "waitElement",
+        "selector": "div.overflow-auto.flex-1.p-24.py-0 > div.my-16",
+        "timeoutMs": 15000,
+        "note": "等不到不算失败，真正的判据是能不能读到消息"
+      }
     ],
     "extract": {
-      "body": { "op": "content", "format": "text", "selector": "", "maxLength": 8000 }
-    }
+      "buyer": {
+        "op": "text",
+        "selector": "div.mb-8 span（meta 行第一个 span，即发送者）"
+      },
+      "topic": {
+        "op": "text",
+        "selector": "div.p-24.pb-0（头部：订单号 + 主题）"
+      },
+      "messages": {
+        "op": "list",
+        "selector": "div.overflow-auto.flex-1.p-24.py-0 > div.my-16"
+      },
+      "body": {
+        "op": "text",
+        "selector": "div.whitespace-pre-wrap",
+        "maxLength": 8000
+      },
+      "orderId": {
+        "op": "regex",
+        "selector": "div.p-24.pb-0",
+        "pattern": "订单号[:：]\\s*(\\d{6,})"
+      }
+    },
+    "directionNote": "方向靠**投递状态**：我方消息的 meta 行里多一个投递状态节点（「Delivered」），买家消息没有。实机两条消息的 x 与宽度完全一致（x=737 / w=714），几何与类名都不可用；两个证据都没有时不做断言（dirGuess=true）。",
+    "caseIdFrom": "url:conversation_id|message_id|thread_id|cid（实测本平台没有这些参数，恒为空串）"
   },
   "reply": {
+    "editor": "freeform",
+    "openSelector": "",
+    "openSelectorNote": "实测不需要展开：打开会话后回复区（选择消息模板 / 回复框 / 发送回复）常驻在会话栏底部。",
+    "inputSelector": "div.relative.p-24.pt-8.flex.flex-col.gap-16 textarea",
+    "inputSelectors": [
+      "div.relative.p-24.pt-8.flex.flex-col.gap-16 textarea",
+      "div.relative.p-24.pt-8.flex.flex-col.gap-16 [contenteditable=\"true\"]"
+    ],
+    "inputNote": "⚠️ 回复框**没有 placeholder 属性**（「在此处输入回复」是旁边的 label），且页面上还有 Marty AI 助手的 textarea —— 所以既不能按 placeholder 找，也不能退回裸 textarea。",
+    "maxLength": 4000,
     "steps": [
-      { "op": "input", "selector": "", "text": "{{draft}}", "clear": true, "timeoutMs": 15000 }
+      {
+        "op": "waitElement",
+        "selector": "div.relative.p-24.pt-8.flex.flex-col.gap-16 textarea",
+        "timeoutMs": 15000
+      },
+      {
+        "op": "input",
+        "selector": "div.relative.p-24.pt-8.flex.flex-col.gap-16 textarea",
+        "text": "{{draft}}",
+        "clear": true
+      }
     ]
   },
   "submit": {
     "op": "click",
     "selector": "",
+    "label": "发送回复",
     "verified": false,
-    "waitNav": false,
-    "timeoutMs": 15000
+    "never": true,
+    "note": "刻意留空并永久 verified=false、never=true：巡逻与本插件的任何接口都不会点它。实机文案是「发送回复」（88x32 的 button），但本剧本**不记它的 CSS 选择器** —— 记下来的选择器没人用，却会让人以为发送按钮已经可以点了。发送只能由人在 Walmart Seller Center 页面上完成。"
   },
   "context": {
     "order": {
+      "optional": true,
+      "optionalNote": "**不是每家店都有**：Walmart-Cozynome-管理员 右侧有「消费者 + 订单详情」栏，Walmart-Yanosaku二店-管理员 没有（2026-10-10 同一天实测，两店布局不同）。所以任何提取都必须 best-effort —— 拿不到就当作没有，不能因此让会话失败。",
+      "panelSelector": "",
+      "panelSelectorNote": "面板是 CSR 哈希类名（sc_react_1_8_8_pxpl_CD/CE），不能写死；可靠的做法是按内容找：包含「订单详情」且包含「采购订单 #:」的最小容器。",
       "steps": [],
-      "extract": {}
+      "extract": {
+        "buyer": {
+          "op": "content",
+          "selector": "占位：包含「消费者」且长度 > 12 的容器，文本形如「消费者 Ayon Ghosh 113 Coles Street, Apt 3, Jersey City, NJ, 07302」"
+        },
+        "orderStatus": {
+          "op": "text",
+          "note": "标签「订单状态:」/「采购订单 #:」/「订单日期:」/「发货时间:」/「订单总额:」/「履约方:」/「速度:」/「商品:」/「成色:」/「SKU:」/「数量:」/「承运人:」/「追踪:」右侧兄弟节点的文本"
+        },
+        "carrier": {
+          "op": "text",
+          "example": "UPS"
+        },
+        "tracking": {
+          "op": "link",
+          "example": "1Z0WD8010322320126"
+        },
+        "amount": {
+          "op": "text",
+          "example": "$ 287.88"
+        },
+        "sku": {
+          "op": "text",
+          "example": "MC001-WH"
+        }
+      },
+      "measured": {
+        "store": "Walmart-Cozynome-管理员（#27800343767219）",
+        "sample": {
+          "订单状态": "Delivered",
+          "采购订单 #": "129126076981832",
+          "订单日期": "09/16/2026",
+          "发货时间": "09/17/2026",
+          "订单总额": "$ 287.88",
+          "履约方": "Seller",
+          "速度": "Standard",
+          "成色": "New",
+          "SKU": "MC001-WH",
+          "数量": "1",
+          "承运人": "UPS",
+          "追踪": "1Z0WD8010322320126",
+          "消费者": "Ayon Ghosh · 113 Coles Street, Apt 3, Jersey City, NJ, 07302"
+        }
+      },
+      "note": "会话头部已有订单号；这里是**订单与物流**（Phase 4 的内容）：金额、承运人、追踪号、SKU 与买家地址都能读到。提取尚未接入适配器 —— 先把实测结构记下来，避免下次从零再挖一遍。"
     }
+  },
+  "selectorsAlignedWith": "lib/platforms/walmart.js",
+  "selectorsAligned": true,
+  "selectorsAlignedAt": "2026-10-10",
+  "login": {
+    "manual": false,
+    "autoLogin": true,
+    "autoLoginNote": "**自动登录（2026-10-10 实机验证）**：沃尔玛登录页上账号密码由**紫鸟密码管理**填好；2 步验证页的动态码由**紫鸟验证码服务**自动填入（弹窗「验证码获取成功」）。所以插件在这里能代劳的只剩「点一下登录 / 点一下继续」—— 于是 patrol 在预检到未登录时会调用适配器的 autoLogin。边界：只点文案精确等于「登录 / Sign In / Log In」或「继续 / Continue / Verify」的按钮，**没有任何输入动作**（不代填账号密码、不碰验证码）；2 步验证页在验证码为空时不点继续，只等紫鸟把码填进来；等不到就如实报「需要人工一次」。",
+    "verifiedStore2FA": "Walmart-Cozynome-管理员（#27800343767219）需要 2 步验证，由紫鸟验证码服务自动填码后点「继续」即登录成功",
+    "fallback": "没有 supportsAutoLogin 的渠道（TikTok）行为不变：预检到未登录就跳过，等人手动登录"
   }
 }

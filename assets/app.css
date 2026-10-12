@@ -1786,6 +1786,72 @@ code {
   font-weight: 600;
 }
 
+/* ── 店铺行里的「登录」（TikTok） ──────────────────────────────────────────
+ * 外层 .store-chip 从 <label> 换成了 <div>：label 会把内部**任何**点击都转发给它的复选框，
+ * 于是点「登录」会顺带把这家店取消勾选。现在复选框与店名包在 .store-chip-pick（内层
+ * <label>）里，登录按钮留在这层之外，两者互不影响。
+ *
+ * 下面三条是那次拆分派生出来的：既有规则一条没动。 */
+.store-chip-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  /* 负外边距 + 等量内边距：点击区域撑满整块 chip，但视觉上的间距与拆分之前逐像素一致
+     —— 拆完之后最容易回退的就是这个「整块可点」，所以宁可把 padding 撑满。 */
+  margin: -6px -4px -6px -6px;
+  padding: 6px 4px 6px 6px;
+  cursor: pointer;
+  border-radius: var(--cs-r-sm);
+}
+
+.store-chip-note {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--cs-fs-xs);
+}
+
+/* 渠道标题：h3 与「N 家未登录」徽章排成一行，别让徽章掉到下一行。 */
+.sub-head-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 收起 / 展开一个平台块。做成小方块按钮，和「仅刷新列表」那些文字按钮区分开：
+   它是纯界面开关，不触发任何请求，长得像功能按钮会被误点成「重新扫描」。 */
+.collapse-toggle {
+  min-width: 26px;
+  padding: 2px 8px;
+  font-size: var(--cs-fs-xs);
+  line-height: 1.4;
+}
+
+/* 全局摘要（「另有 N 个平台不会被巡逻」）：排在所有渠道块之前，说一次就够。 */
+.sources-summary {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: var(--cs-r-md, 8px);
+  background: color-mix(in srgb, var(--cs-text) 4%, transparent);
+}
+
+.sources-summary > .muted {
+  margin-bottom: 6px;
+}
+
+/* 收起时留一点下边距，免得和下一块贴在一起看不出边界。 */
+.source-block:has(> .source-body) .sub-head {
+  margin-bottom: 8px;
+}
+
+.sub-head-title h3 {
+  margin: 0;
+  font-size: var(--cs-fs-md);
+  color: var(--cs-text);
+}
+
 .patrol-bar {
   height: 10px;
   margin: 14px 0;
@@ -2020,6 +2086,66 @@ code {
   padding-top: 10px;
   border-top: 1px dashed var(--cs-border);
   font-size: var(--cs-fs-sm);
+}
+
+/* 每个平台块底下的「定时巡检」：时刻表 + 巡检店铺 + 保存。
+   它是这个平台**自己的一份**计划，所以用左侧竖线跟上面的店铺勾选区隔开 ——
+   两块东西都在同一平台块里，不隔一下会分不清「这是这次手动巡逻的目标」
+   还是「这是到点自动巡逻的目标」。 */
+.auto-plan {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--cs-border);
+  border-left: 3px solid var(--cs-brand);
+  border-radius: var(--cs-r-sm);
+  background: var(--cs-bg-inset);
+}
+
+.auto-plan-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.auto-plan-title {
+  font-size: var(--cs-fs-md);
+  font-weight: 600;
+  color: var(--cs-text);
+}
+
+.auto-plan .field {
+  margin: 6px 0;
+}
+
+.auto-plan-actions {
+  margin-top: 10px;
+}
+
+/* 「只巡检哪几家」：默认收起（几十家店全列出来太长），展开后是多列勾选。 */
+.auto-stores > summary {
+  padding: 6px 0;
+  color: var(--cs-text-dim);
+  font-size: var(--cs-fs-sm);
+  cursor: pointer;
+}
+
+.auto-stores > summary:hover {
+  color: var(--cs-brand-text);
+}
+
+.auto-store-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 2px 12px;
+  max-height: 260px;
+  margin: 4px 0 2px;
+  overflow: auto;
+}
+
+.auto-store-grid .field {
+  margin: 2px 0;
 }
 
 /* ── 13. 响应式与动效偏好 ─────────────────────────────────────────────── */

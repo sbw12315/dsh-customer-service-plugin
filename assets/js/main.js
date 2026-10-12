@@ -79,16 +79,21 @@ function renderSubNav(active) {
  *
  * 刻意**不比对版本号字符串**：页面顶栏的版本号是宿主半注入的（`__CS_VERSION__` 来自
  * 被缓存的模块），旧后端会把它自己那个旧版本号注入进来，两边一比就是「相等」，
- * 反而检测不出错配。要探的是**能力**：新前端要的接口在不在、渠道枚举里有没有 amazon。
+ * 反而检测不出错配。要探的是**能力**：新前端要的接口在不在、渠道枚举里有没有 amazon / tiktok / walmart。
  */
 const HOST_CONTRACT = {
-  channels: ['amazon'],
+  // 每加一个渠道就在这里列一个：旧后端不认这个渠道时，顶部会直接提示「请重启 DSH」，
+  // 否则使用者只会看到「渠道里怎么没有沃尔玛」，看不出是后端没跟上。
+  channels: ['amazon', 'tiktok', 'walmart', 'shein', 'temu'],
   metaKeys: ['drafts', 'patrol'],
   // 设置页的「禁用 / 启用 CLI」开关要靠 /health 里的 clis[*].enabled 才画得对：
   // 旧后端没有这个字段，按钮会照常出现、点下去却静默无效 —— 那比不显示更糟。
   healthClis: ['ziniao', 'lark'],
   // 能力位：新前端要用、旧后端还没有的功能。缺了就在顶部提示重启，别让人点空按钮。
-  capabilities: ['drafts.delete'],
+  // patrol.autoPerChannel：定时巡检改成「每个平台一份」之后，/patrol 里的 autoPatrol
+  // 从 { enabled, times } 变成 { channels: {...} }。字段名都在，光看响应看不出新旧，
+  // 结果就是每个平台块底下的定时巡检整块消失 —— 所以必须靠能力位认出来。
+  capabilities: ['drafts.delete', 'patrol.autoPerChannel', 'patrol.channelSwitch'],
 };
 
 /** 错配时把「缺了什么」记下来，贴在提示里，避免使用者只看到一句 404。 */

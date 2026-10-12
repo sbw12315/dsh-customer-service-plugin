@@ -101,12 +101,17 @@ let queueOk = false;
 let queueTotal = null;
 let patrolOk = false;
 let patrolStores = null;
+let autoOk = false;
 let draftsOk = false;
 let draftsTotal = null;
 try {
   const data = JSON.parse(meta.text).data;
+  // 逐个渠道点名，而不是数字数：数数会在「加了渠道」那天直接变成假警报
+  // （原来写的是 === 4，SHEIN 接进来之后就一直是 false，体检报告会说后端是旧模块）。
+  const channels = data?.dimensions?.channels ?? [];
   metaOk =
-    data?.dimensions?.channels?.length === 4 &&
+    Array.isArray(channels) &&
+    ['mail', 'amazon', 'tiktok', 'walmart', 'shein', 'temu'].every((id) => channels.includes(id)) &&
     Boolean(data?.drafts?.statuses) &&
     Boolean(data?.patrol?.defaults);
 } catch {
@@ -131,6 +136,9 @@ try {
     Array.isArray(parsed.data?.channels) &&
     Boolean(parsed.data?.sources?.amazon);
   patrolStores = parsed.data?.sources?.amazon?.items?.length ?? null;
+  // 定时巡检是不是「每个平台一份」这一版：旧模块只有全局 enabled / times，
+  // 界面会因此画不出每平台那份面板 —— 字段名都在，肉眼从响应里看不出来。
+  autoOk = Boolean(parsed.data?.autoPatrol?.channels?.amazon);
 } catch {
   patrolOk = false;
 }
@@ -151,6 +159,11 @@ line(
   meta.text ? (JSON.parse(meta.text).data?.patrol?.channels ?? []).join('、') || '—' : '—',
 );
 line(draftsOk, 'GET /api/drafts 可用（草稿库）', draftsOk ? `现有 ${draftsTotal} 条草稿` : '重启 DSH 后可用');
+line(
+  autoOk,
+  '定时巡检是「每个平台一份」这一版',
+  autoOk ? '按平台各设时刻与店铺' : '旧模块只有全局 enabled / times → 需要重启 DSH',
+);
 
 console.log('');
 const verdict =
@@ -165,6 +178,7 @@ const verdict =
   statsOk &&
   queueOk &&
   patrolOk &&
+  autoOk &&
   draftsOk;
 console.log(verdict ? '结论：一切正常。' : '结论：还有问题，见上面标 ✗ 的行。');
 process.exitCode = verdict ? 0 : 2;

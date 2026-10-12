@@ -247,3 +247,39 @@ test('hasCjk：按码点判断，不依赖正则转义', () => {
   assert.equal(hasCjk('order'), false);
   assert.equal(hasCjk(''), false);
 });
+
+/* ── 话术口径（v0.14.0）：损坏直接要照片 + 免费补发配件（不是整包），且不索要订单号 ─── */
+
+test('buildDraft：损坏一律直接要照片，并承诺免费补发配件（不是整包）', () => {
+  const draft = buildDraft({
+    buyer: 'Jen',
+    subject: 'Damaged or defective item',
+    inbound: 'The leg arrived broken. I need a replacement part.',
+    storeName: 'Amazon-Cozynome-管理员',
+  });
+  assert.equal(draft.intent, 'replacement');
+  assert.match(draft.body, /photo/i, '要直接索要照片');
+  assert.match(draft.body, /free of charge/i, '要承诺免费补发');
+  assert.match(draft.body, /part only, not the whole set/i, '补的是配件，不是整包');
+});
+
+test('buildDraft：任何意图都不向买家索要订单号', () => {
+  const samples = {
+    replacement: 'the item is broken, need a replacement',
+    refund: 'I want a refund',
+    shipping: 'my package did not arrive',
+    return: 'I want to return it',
+    cancel: 'please cancel my order',
+    invoice: 'Can you send me an invoice for my order?',
+    acknowledge: 'Thank you so much!!',
+    inquiry: 'hello, a question',
+  };
+  for (const intent of INTENTS) {
+    const draft = buildDraft({ buyer: 'sam', subject: '', inbound: samples[intent], storeName: 'Amazon-Test-管理员' });
+    assert.equal(
+      /order (?:number|id)|reference number|订单号/i.test(draft.body),
+      false,
+      intent + '：正文里不能向买家索要订单号',
+    );
+  }
+});

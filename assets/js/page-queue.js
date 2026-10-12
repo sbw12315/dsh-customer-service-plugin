@@ -9,7 +9,7 @@ import { get, patch, post, toQuery } from './api.js';
 import { badge, button, clear, input, node, panel, select, toast } from './dom.js';
 import { DASH, dateTime, num, relative, slaCountdown } from './format.js';
 
-const CHANNEL_LABEL = { mail: '飞书邮件', tiktok: 'TikTok Shop', walmart: 'Walmart', amazon: 'Amazon' };
+const CHANNEL_LABEL = { mail: '飞书邮件', tiktok: 'TikTok Shop', walmart: 'Walmart', shein: 'SHEIN', temu: 'TEMU', amazon: 'Amazon' };
 const KIND_LABEL = { message: '买家消息', review: '评价回复', afterSales: '售后工单', orderInquiry: '订单咨询' };
 const STATUS_LABEL = {
   new: '待处理',
@@ -82,6 +82,8 @@ function newForm() {
       node('option', { value: 'mail', text: CHANNEL_LABEL.mail }),
       node('option', { value: 'tiktok', text: CHANNEL_LABEL.tiktok }),
       node('option', { value: 'walmart', text: CHANNEL_LABEL.walmart }),
+      node('option', { value: 'shein', text: CHANNEL_LABEL.shein }),
+      node('option', { value: 'temu', text: CHANNEL_LABEL.temu }),
       node('option', { value: 'amazon', text: CHANNEL_LABEL.amazon }),
     ]),
     kind: node('select', { id: 'new-kind' }, Object.entries(KIND_LABEL).map(([value, text]) => node('option', { value, text }))),

@@ -61,6 +61,7 @@ const STORE_LIST = {
     { storeId: '27630232762680', storeName: 'Amazon-Cozynome-管理员', platformName: '亚马逊-美国' },
     { storeId: '27800343767219', storeName: 'Walmart-Cozynome-管理员', platformName: '沃尔玛-全球' },
     { storeId: '27999999999999', storeName: 'Amazon-FUSOU-客服', platformName: '亚马逊-欧洲' },
+    { storeId: '27000000000001', storeName: 'Amazon-FUSOU-停用', platformName: '亚马逊-美国' },
   ],
 };
 
@@ -145,10 +146,11 @@ test('adapter.listAllStores 给全量、listStores 只给亚马逊店', async ()
 
   // 「扫描可用店铺」要看到全量：非亚马逊店也得列出来，界面才能解释它为什么不被巡逻。
   const all = await adapter.listAllStores();
-  assert.deepEqual(all.map((store) => store.storeId), ['27630232762680', '27800343767219', '27999999999999']);
+  assert.deepEqual(all.map((store) => store.storeId), ['27630232762680', '27800343767219', '27999999999999', '27000000000001']);
 
   const amazon = await adapter.listStores();
   assert.deepEqual(amazon.map((store) => store.storeId), ['27630232762680', '27999999999999']);
+  assert.equal(amazon.some((store) => store.storeId === '27000000000001'), false, '名字带「停用」的亚马逊店不巡逻（打开只会撞登录/错误页）');
 });
 
 test('adapter.extractList：解出会话列表与到期时间', async () => {
@@ -357,5 +359,14 @@ test('紫鸟CLI 在设置里被禁用时，亚马逊渠道不再参与巡逻', (
     createAmazonAdapter({ ziniao: {}, settings: { cliEnabled: { ziniao: true } } }).enabled(),
     true,
   );
-  assert.match(createAmazonAdapter({ ziniao: {} }).disabledHint, /禁用/);
+  assert.match(createAmazonAdapter({ ziniao: {} }).disabledHint(), /禁用/);
+
+  // v0.13.0：渠道自己还有一枚开关（巡逻页那一行），它跟 CLI 总开关**分开判**。
+  const channelOff = createAmazonAdapter({ ziniao: {}, settings: { channelEnabled: { amazon: false } } });
+  assert.equal(channelOff.channelEnabled(), false, '渠道开关关掉了');
+  assert.equal(channelOff.enabled(), false, '渠道关掉就不参与巡逻（CLI 开着也一样）');
+  assert.match(channelOff.disabledHint(), /巡逻页/, '要指名道姓：是渠道被停用，不是 CLI 被禁用');
+  const cliOff = createAmazonAdapter({ ziniao: {}, settings: { cliEnabled: { ziniao: false } } });
+  assert.equal(cliOff.channelEnabled(), true, 'CLI 被禁用不影响「渠道开关开着」这个事实');
+  assert.match(cliOff.disabledHint(), /紫鸟CLI/);
 });

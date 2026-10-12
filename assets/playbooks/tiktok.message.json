@@ -4,47 +4,233 @@
   "platformLabel": "TikTok Shop",
   "capability": "message",
   "capabilityLabel": "买家消息 / 站内信",
-  "verified": false,
-  "note": "出厂模板，选择器全部为空且未校准。必须先在控制台的「校准模式」里对着真实店铺点选回填，并把 submit.verified 置为 true，发送按钮才会解锁。",
+  "verified": true,
+  "note": "【已校准 · 2026-10-10】读取链路在真实店铺 **Tiktok-FUSOU-客服主号**（FUSOU Furniture，shop_region=US）上完成校准：客服会话管理页 61 条会话、单会话 21 条消息，列表/正文/回复框三条链路都用真实 data-testid 跑通，并实测生成了草稿、默认填入回复框。真实入口是 IM 图标打开的 /chat（不是 /message），US 店域名是 seller.us.tiktokshopglobalselling.com（带 us.）。选择器值的唯一真相源是 lib/platforms/tiktok.js 导出的常量（本文件与它逐字一致，有测试逐字对照）。控制台的「校准模式」仍未实现（Phase 3b），但本文件的选择器已经不再需要人工回填。",
+  "unverifiedReason": "（已校准，此字段保留为历史说明）原先 6 家店全部未登录、无 DOM 可校准；2026-10-10 登录 Tiktok-FUSOU-客服主号 后完成校准。仍未覆盖：只在一家 US 店验证（跨境主站 /chat 未验）、未接平台自身的「未回复」筛选控件、发图/附件等交互未涉及。",
+  "calibrate": {
+    "ready": true,
+    "mode": "manual",
+    "implemented": false,
+    "note": "「校准模式」这个功能仍未做（README Phase 3b 计划项）—— 但本剧本的选择器已在真实 DOM 上校准完毕，不再需要它。下面保留人工复核步骤，供换站点/改版后重新校准用。",
+    "steps": [
+      "1. 在紫鸟浏览器里打开任意一家 TikTok 店，人工登录到 TikTok 商家中心（登录态存在店铺 profile 里，登录一次后续复用）。",
+      "2. 进「客服 / 买家消息」页面（跨境主入口的路径常量是 /message，即 INBOX_PATH），把会话列表与某一条会话都打开，让列表和消息真正渲染出来。",
+      "3. 用紫鸟 CLI 对着真实 DOM 核对候选选择器：ziniao-cli page query --selector '<候选选择器>'（或走控制台的店铺页面查询接口），逐个确认能取到元素、且取到的是目标那一个。适配器里的每个兜底数组都要按顺序核一遍，命中哪一个就把它提到最前。",
+      "4. 把确认过的值逐字填进本文件，并同步改 lib/platforms/tiktok.js 里的同名常量 —— 两边必须逐字一致，否则以 lib/platforms/tiktok.js 为准。",
+      "5. 把 verified 置为 true，并在此处记录校准日期与店铺/站点（例如「2026-11 于 US 站实测」）。",
+      "6. submit 段**永远不要改**：selector 保持空、verified 保持 false、never 保持 true（见 submit.note）。"
+    ],
+    "calibratedAt": "2026-10-10",
+    "calibratedOn": "紫鸟店铺 Tiktok-FUSOU-客服主号 / FUSOU Furniture / shop_region=US"
+  },
+  "failureMode": {
+    "note": "未校准状态下跑巡逻会怎么失败 —— 要明确报出来，不许静默漏扫。",
+    "expected": [
+      "店铺未登录：适配器用 SIGNIN_URL_RE（实测过的那一条）识别出登录页，直接报「店铺未登录」，并把该店标成失败，不会假装读过消息。",
+      "选择器不匹配：读取脚本返回 ok:false 并明确区分两种 reason —— no-list-container（容器没找到：多半是改版，或压根没进到消息中心）与 no-rows（容器在但没有行：多半是行选择器变了）。两种情况都带上 tried（每个位置试过哪些兜底选择器），而不是返回 0 条却算成功。",
+      "任何情况下都不会出现「静默漏扫」：一条消息读不到，必须在店铺结果里留下可照做的错误说明。"
+    ]
+  },
   "entry": {
-    "url": "",
-    "storeOpen": true
+    "base": "https://seller.tiktokshopglobalselling.com",
+    "baseUs": "https://seller.us.tiktokshopglobalselling.com",
+    "path": "/chat",
+    "url": "https://seller.us.tiktokshopglobalselling.com/chat",
+    "caseUrlTemplate": "",
+    "caseIdFrom": "",
+    "storeOpen": true,
+    "signinUrlRe": "/\\/account\\/login|\\/login\\/|\\/login(?:[?#]|$)/i",
+    "note": "两个站点入口都是实测的。**消息中心是 /chat，不是 /message**；US 店的真实域名是 seller.us.tiktokshopglobalselling.com（带 us.），不是 seller-us.tiktok.com（那是注册落地页）。",
+    "caseIdLimitation": "**实测结论：TikTok Shop 没有会话级深链。** 在 /chat 里点击不同会话，location.href 恒为 /chat/inbox/current，不随会话变化；会话卡片的 id 是 chat-room-conversation-list-item-0 这种**位置序号**，不是稳定会话标识（列表一刷新就指错会话）。因此 conversationUrl() 永远返回空串，界面据此隐藏「打开原会话」—— 恒返回空串（而不是退回消息中心首页）是刻意的：一个能点开、看着像对的错链接，比没有链接糟得多。"
   },
   "list": {
-    "waitFor": { "op": "waitElement", "selector": "", "timeoutMs": 20000 },
-    "items": { "selector": "", "unreadSelector": "", "refAttr": "" },
+    "selector": "[data-testid=\"chat.chatroom.conversation_list\"]",
+    "fallbackSelectors": [
+      "[data-testid=\"chat.chatroom.conversation_list\"]",
+      "[class*=\"conversation_list\"]",
+      "[class*=\"conversationList\"]",
+      "main ul[role=\"list\"]"
+    ],
+    "waitFor": {
+      "op": "waitElement",
+      "selector": "[data-testid=\"chat.chatroom.conversation_list\"]",
+      "timeoutMs": 30000
+    },
+    "items": {
+      "selector": "[data-testid=\"chat.chatroom.conversation_card\"]",
+      "fallbackSelectors": [
+        "[data-testid=\"chat.chatroom.conversation_card\"]",
+        "[class*=\"conversation_card\"]",
+        "li[role=\"listitem\"]"
+      ],
+      "unreadSelector": "[data-e2e=\"conversation-unread\"]",
+      "unreadClassRe": "/unread|badge|dot|pending/i",
+      "orderIdAttr": "",
+      "refAttr": "",
+      "calibratedNote": "实测 [data-testid=\"chat.chatroom.conversation_card\"]，实机 17 行。买家名 [data-testid=\"chat.chatroom.conversation_card_username\"]。⚠️ 不能用 :nth-of-type(N) 定位行 —— 行是 <div>，该伪类按同类型兄弟计数，卡片之间夹着虚拟滚动占位，会数错行（实测表现为「第 2 条会话不在列表里了」）。改用按数组下标取。"
+    },
     "extract": {
-      "from": "",
+      "from": "[data-e2e=\"conversation-name\"]",
+      "snippet": "[data-e2e=\"conversation-preview\"]",
+      "date": "[data-e2e=\"conversation-time\"]",
+      "country": "",
       "subject": "",
-      "snippet": "",
-      "url": ""
+      "due": ""
+    },
+    "extractFallbacks": {
+      "from": [
+        "[data-e2e=\"conversation-name\"]",
+        "[class*=\"conversation-name\"]",
+        "[class*=\"nickname\"]",
+        "strong"
+      ],
+      "snippet": [
+        "[data-e2e=\"conversation-preview\"]",
+        "[class*=\"conversation-preview\"]",
+        "[class*=\"preview\"]",
+        "p"
+      ],
+      "date": [
+        "[data-e2e=\"conversation-time\"]",
+        "time",
+        "[class*=\"time\"]"
+      ],
+      "unread": [
+        "[data-e2e=\"conversation-unread\"]",
+        "[class*=\"unread\"]",
+        "[class*=\"badge\"]"
+      ]
     }
   },
   "read": {
+    "selector": "[class*=\"chatd-scrollView-content\"]",
+    "fallbackSelectors": [
+      "[class*=\"chatd-scrollView-content\"]",
+      "[class*=\"scrollView-content\"]",
+      "[class*=\"message-detail\"]",
+      "main section"
+    ],
     "steps": [
-      { "op": "click", "ref": "{{itemRef}}" },
-      { "op": "waitElement", "selector": "", "timeoutMs": 20000 }
+      {
+        "op": "click",
+        "ref": "{{itemRef}}",
+        "selector": "[data-e2e=\"conversation-item\"]"
+      },
+      {
+        "op": "waitElement",
+        "selector": "[data-e2e=\"message-detail\"]",
+        "timeoutMs": 20000
+      }
     ],
     "extract": {
-      "body": { "op": "content", "format": "text", "selector": "", "maxLength": 8000 }
-    }
+      "buyer": {
+        "op": "text",
+        "selector": "[data-e2e=\"customer-name\"]"
+      },
+      "topic": {
+        "op": "text",
+        "selector": ""
+      },
+      "messages": {
+        "op": "list",
+        "selector": "[data-testid=\"chat.chatroom.message_card\"]"
+      },
+      "body": {
+        "op": "content",
+        "format": "text",
+        "selector": "[data-e2e=\"message-content\"]",
+        "maxLength": 8000
+      },
+      "date": {
+        "op": "text",
+        "selector": "[data-e2e=\"message-time\"]"
+      },
+      "inbound": {
+        "op": "list",
+        "selector": "[data-e2e=\"message-item\"][data-direction=\"in\"]"
+      }
+    },
+    "extractFallbacks": {
+      "buyer": [
+        "[data-e2e=\"customer-name\"]",
+        "[class*=\"customer-name\"]",
+        "[class*=\"buyer-name\"]",
+        "header strong"
+      ],
+      "body": [
+        "[data-e2e=\"message-content\"]",
+        "[class*=\"message-content\"]",
+        "[class*=\"bubble-content\"]"
+      ],
+      "date": [
+        "[data-e2e=\"message-time\"]",
+        "time",
+        "[class*=\"message-time\"]"
+      ],
+      "messages": [
+        "[data-e2e=\"message-item\"]",
+        "[data-tid=\"message-item\"]",
+        "[class*=\"message-item\"]",
+        "[class*=\"message-bubble\"]"
+      ]
+    },
+    "caseIdFrom": "url:conversation_id",
+    "note": "与 amazon 的差别：这边没有实测样本，所以等不到消息体时**重读**而不是直接下结论；一直读不到就如实返回空 messages，并带上试过的选择器。",
+    "calibratedNote": "实测消息 [data-testid=\"chat.chatroom.message_card\"]（实机 21 条）。**方向判定改用发送者前缀**：实机 21 条消息 x 坐标全是 488、类名差异不稳定，几何与类名都区分不出来；可靠判据是我方消息带客服名（Customer Service-RUI）或店铺名（FUSOU Furniture），买家消息不带，另有一类系统消息（会话被分配 / 系统关闭聊天）两边都不算。"
   },
   "reply": {
+    "editor": "freeform",
+    "openSelector": "",
+    "openFallbackSelectors": [
+      "[data-e2e=\"reply-button\"]",
+      "[data-tid=\"reply-button\"]",
+      "[class*=\"reply-btn\"]"
+    ],
+    "inputSelector": "textarea[data-testid=\"chat.chatroom.trans_chat_input\"]",
+    "inputFallbackSelectors": [
+      "textarea[data-testid=\"chat.chatroom.trans_chat_input\"]",
+      "textarea[class*=\"chat_input\"]",
+      "textarea[placeholder]",
+      "div[contenteditable=\"true\"][role=\"textbox\"]"
+    ],
+    "maxLength": 4000,
     "steps": [
-      { "op": "input", "selector": "", "text": "{{draft}}", "clear": true, "timeoutMs": 15000 }
-    ]
+      {
+        "op": "click",
+        "selector": "[data-e2e=\"reply-button\"]",
+        "optional": true
+      },
+      {
+        "op": "waitElement",
+        "selector": "[data-e2e=\"message-input\"]",
+        "timeoutMs": 15000
+      },
+      {
+        "op": "input",
+        "selector": "[data-e2e=\"message-input\"]",
+        "text": "{{draft}}",
+        "clear": true
+      }
+    ],
+    "note": "与 amazon 一样：「展开回复框」那个按钮是**有就点一下**，判据永远是输入框在不在（TikTok 新式 IM 里回复框常常默认展开）。输入框兜底顺序（与适配器逐字一致）：[data-e2e=\"message-input\"] → div[contenteditable=\"true\"][role=\"textbox\"] → textarea[class*=\"message-input\"] → textarea[placeholder] → div[contenteditable=\"true\"]；contenteditable 的 div 排在靠前位置，因为商家中心里不少输入控件是富文本容器而不是 textarea。",
+    "calibratedNote": "实测回复框是 textarea[data-testid=\"chat.chatroom.trans_chat_input\"]（placeholder「输入\"/\"快速调用快捷回复」），**常驻展开**，实测不需要点任何「展开回复框」按钮。⛔ 发送按钮是 button[data-testid=\"chat.chatroom.send_message_btn\"]（文案「发送」）—— 知道它在哪，但本插件任何链路都不会点它。"
   },
   "submit": {
     "op": "click",
     "selector": "",
     "verified": false,
-    "waitNav": false,
-    "timeoutMs": 15000
+    "never": true,
+    "note": "刻意留空并永久 verified=false、never=true：巡逻与本插件的任何接口都不会点它。发送只能由人在 TikTok 商家中心页面上完成。"
   },
   "context": {
     "order": {
+      "panelSelector": "",
       "steps": [],
-      "extract": {}
+      "extract": {},
+      "note": "TikTok 站内信里没有亚马逊那种订单面板，暂不提取。"
     }
-  }
+  },
+  "selectorsAlignedWith": "lib/platforms/tiktok.js",
+  "selectorsAligned": true,
+  "selectorsAlignedAt": "2026-10"
 }

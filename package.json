@@ -1,7 +1,7 @@
 {
   "name": "dsh-customer-service-plugin",
-  "version": "0.6.0",
-  "description": "客服插件：DSH 里的点击式客服控制台。一键巡逻全部 Amazon 店铺的买家消息并批量生成草稿，计划/话术模板/排班/队列，通过紫鸟CLI 操作 TikTok Shop / Walmart / Amazon 店铺、通过飞书CLI 回复客服邮件；草稿先行，人工点发送。",
+  "version": "0.14.0",
+  "description": "客服插件：DSH 里的点击式客服控制台。一键巡逻全部 Amazon / TikTok Shop / 沃尔玛 / SHEIN / TEMU 店铺的买家消息、以及飞书公共邮箱，批量生成草稿；计划/话术模板/排班/队列；通过紫鸟CLI 操作店铺、通过飞书CLI 回复客服邮件；草稿先行，人工点发送；沃尔玛支持自动登录（只点登录按钮，不代填凭据），可无人值守巡逻；每个渠道可单独启用/停用。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -25,6 +25,7 @@
   },
   "scripts": {
     "test": "node --test",
+    "smoke": "node scripts/smoke-boot.mjs",
     "pack": "npm pack"
   },
   "keywords": [

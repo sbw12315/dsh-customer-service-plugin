@@ -29,7 +29,8 @@ const state = { health: null, settings: null };
 
 /** 禁用一个 CLI 会影响什么：直接写在卡片上，别让人猜。 */
 const CLI_DISABLE_NOTE = {
-  ziniao: '禁用后不再调用紫鸟CLI：亚马逊店铺巡逻会跳过这个渠道，扫描只回报「未启用」。',
+  ziniao: '禁用后不再调用紫鸟CLI：亚马逊与 TikTok Shop 的店铺巡逻都会跳过这两个渠道；扫描只回报「未启用」。'
+    + '注意「登录」也跟着不能用 —— 登录那一步正是靠紫鸟把店铺窗口开出来的，所以禁用期间巡逻页的登录按钮会打不开任何窗口。',
   lark: '禁用后不再调用飞书CLI：飞书邮件渠道不参与巡逻（即使「启用飞书邮箱渠道」是勾上的）。',
 };
 
@@ -232,11 +233,13 @@ function settingsForm() {
             node('input', {
               type: 'checkbox',
               id: 'mail-enabled',
+              // mailEnabled 是服务端从 channelEnabled 派生出来的镜像，两者永远一致。
               checked: s.mailEnabled === true,
             }),
             node('span', { class: 'field-inline-note', text: s.mailEnabled === true ? '已启用' : '默认关闭' }),
           ]),
-          '邮箱是「别人的地盘」，所以默认关着。要打开请先按下面那行确认飞书CLI 已接好，再勾上这里并保存。',
+          '邮箱是「别人的地盘」，所以默认关着。要打开请先按下面那行确认飞书CLI 已接好，再勾上这里并保存；'
+            + '巡逻页「飞书邮箱」那一行的开关改的是同一处。',
         ),
         field('飞书CLI 当前状态', larkStatusNode(), null),
       ]),
@@ -268,7 +271,10 @@ async function save(stateLabel) {
       cliPaths: { ziniao: valueOf('cli-ziniao').trim(), lark: valueOf('cli-lark').trim() },
       cliArgs: { ziniao: valueOf('cli-args-ziniao'), lark: valueOf('cli-args-lark') },
       mailboxes: valueOf('mailboxes'),
-      mailEnabled: document.getElementById('mail-enabled')?.checked === true,
+      // 渠道开关统一走 channelEnabled（v0.13.0）：飞书邮箱是其中一个渠道，
+      // 巡逻页那一行的开关写的是同一处。老的 mailEnabled 服务端仍然认（兼容旧标签页），
+      // 但这里不再写它 —— 两个入口写两个字段，迟早会出现「两边显示不一样」。
+      channelEnabled: { 'lark-mail': document.getElementById('mail-enabled')?.checked === true },
       dataDir: valueOf('data-dir').trim(),
       sla: { defaultHours: valueOf('sla-hours') },
       retention: { auditDays: valueOf('audit-days') },

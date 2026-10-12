@@ -108,6 +108,38 @@ test('enabled()：默认关闭，只有 settings.mailEnabled 为 true 才算启�
   assert.equal(adapter.enabled(), true);
 });
 
+test('渠道开关（v0.13.0）：channelEnabled 是新入口，老的 mailEnabled 仍然认', () => {
+  const lark = fakeLark({ user_mailboxes: mailboxQuery });
+  // 巡逻页那一行的开关写的是 channelEnabled。
+  const byChannel = createLarkMailAdapter({ lark, settings: { channelEnabled: { 'lark-mail': true } } });
+  assert.equal(byChannel.channelEnabled(), true);
+  assert.equal(byChannel.enabled(), true);
+  assert.equal(
+    createLarkMailAdapter({ lark, settings: { channelEnabled: { 'lark-mail': false } } }).enabled(),
+    false,
+  );
+  // 老设置文件里只有 mailEnabled：照样认（存量的 settings.json 不能被升级弄丢）。
+  assert.equal(createLarkMailAdapter({ lark, settings: { mailEnabled: true } }).enabled(), true);
+  // 两个键同时出现时以 channelEnabled 为准 —— 否则巡逻页的开关会「点了没反应」。
+  const both = createLarkMailAdapter({
+    lark,
+    settings: { mailEnabled: true, channelEnabled: { 'lark-mail': false } },
+  });
+  assert.equal(both.enabled(), false);
+
+  // disabledHint 要说清是「被停用」还是「从来就没开」：两件事要人做的动作不一样。
+  assert.match(both.disabledHint(), /停用/);
+  assert.match(
+    createLarkMailAdapter({ lark, settings: { mailEnabled: false } }).disabledHint(),
+    /默认关闭/,
+  );
+  // CLI 被禁用是第三种原因，仍然要说 CLI。
+  assert.match(
+    createLarkMailAdapter({ lark, settings: { mailEnabled: true, cliEnabled: { lark: false } } }).disabledHint(),
+    /飞书CLI/,
+  );
+});
+
 test('listSources：没配置邮箱时给出可照做的提示，且不白调 CLI', async () => {
   const lark = fakeLark({ user_mailboxes: mailboxQuery });
   const adapter = createLarkMailAdapter({ lark, settings: { mailboxes: [] } });

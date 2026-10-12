@@ -4,7 +4,35 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { apply, inject, name, VERSION } from '../lib/index.js';
+import { apply, groupSkippedByPlatform, inject, name, summarizeSkipped, VERSION } from '../lib/index.js';
+
+/**
+ * 造一个**行为像真实 Cordis** 的 ctx：未 provide 的属性**赋值即抛**。
+ *
+ * 为什么需要它：真实的 Cordis ctx 是 Proxy，给一个没声明过的属性赋值会直接抛
+ *   Error: cannot set property "xxx" without provide
+ * 而 apply() 是插件的**激活函数** —— 在那里抛出去，整个插件就挂不上（控制台路由不注册、
+ * 界面全白，宿主只留一行 warning）。这个坑真实发生过：一个测试专用钩子
+ * `ctx.pluginRuntime = runtime` 在全部单测里都是绿的（假的 ctx 是普通对象，赋值不报错），
+ * 一到真实宿主就让插件激活失败。
+ *
+ * 所以这份替身刻意**比真实宿主更严格**：任何未声明的属性赋值都会抛，
+ * 让「只有真实 ctx 才会炸」的写法在单测阶段就暴露出来。
+ * @param {{subprocess?: boolean}} [options] - 是否提供 subprocess 服务。
+ * @returns {object} ctx 与录制到的调用。
+ */
+function strictContext(options = {}) {
+  const inner = fakeContext(options);
+  return new Proxy(inner, {
+    set(target, prop, value) {
+      if (!(prop in target)) {
+        throw new Error(`cannot set property "${String(prop)}" without provide`);
+      }
+      target[prop] = value;
+      return true;
+    },
+  });
+}
 
 /**
  * 造一个只实现插件用到的那部分能力的 Cordis ctx。
@@ -83,6 +111,64 @@ async function withPlugin(run, pluginOptions = {}) {
     delete process.env.DSH_CS_DIR;
   }
 }
+
+test('激活时不能给真实 Cordis ctx 写未声明的属性（否则整个插件挂不上）', async () => {
+  // 回归测试：真实宿主里 apply() 抛过一次
+  //   Error: cannot set property "pluginRuntime" without provide
+  // 后果是插件完全不激活：/cs 路由不注册、控制台页面全白，宿主只打一行 warning。
+  // 那个写法在普通假 ctx 上是绿的（普通对象赋值不报错），所以必须有这一条严格替身来兜住。
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-strict-'));
+  process.env.DSH_CS_DIR = dataDir;
+  try {
+    const ctx = strictContext();
+    // 不抛 = 通过；抛了就是又有人在 apply() 里给 ctx 写属性了。
+    apply(ctx);
+    assert.equal(ctx.routes.length, 1, '严格 ctx 下也必须成功注册控制台路由');
+    assert.equal(ctx.routes[0].path, '/cs');
+    // 路由必须真的能用，不只是「注册了」。
+    const server = http.createServer(ctx.routes[0].handler);
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const res = await fetch(`http://127.0.0.1:${server.address().port}/cs/api/meta`);
+      assert.equal(res.status, 200);
+      const payload = await res.json();
+      assert.equal(payload.data.version, VERSION);
+      assert.ok(payload.data.dimensions.channels.includes('tiktok'));
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  } finally {
+    delete process.env.DSH_CS_DIR;
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('被跳过的目标按平台聚合：报的是平台数，不是店铺数', () => {
+  // 「另有 N 个平台不会被巡逻」里的 N 必须是**平台数**。实测账号 72 家店 / 24 个平台，
+  // 按店铺报会得到「64 个目标」——数字很大但看不出是什么，而且每个渠道各报一遍。
+  const skipped = [
+    { storeId: 'a', platformName: 'SHEIN-全球' },
+    { storeId: 'b', platformName: 'SHEIN-全球' },
+    { storeId: 'c', platformName: 'SHEIN-全球' },
+    { storeId: 'd', platformName: 'Temu-中国卖家中心' },
+    { storeId: 'e', platformName: '沃尔玛-全球' },
+  ];
+  const grouped = groupSkippedByPlatform(skipped);
+  assert.equal(grouped.length, 3, '3 家 SHEIN 只算 1 个平台');
+  assert.deepEqual(grouped[0], { platformName: 'SHEIN-全球', stores: 3 }, '按店铺数倒序');
+
+  const summary = summarizeSkipped(skipped);
+  assert.equal(summary.platforms, 3, '平台数');
+  assert.equal(summary.stores, 5, '店铺数');
+  assert.notEqual(summary.platforms, summary.stores, '两个口径不能混');
+
+  // 缺 platformName 的不能丢，也不能变成 "undefined" 这种能看出来的脏字符串。
+  assert.deepEqual(groupSkippedByPlatform([{ storeId: 'x' }]), [{ platformName: '未知平台', stores: 1 }]);
+  // 空输入 / 非数组都要安全（界面上没扫过时就是空）。
+  assert.deepEqual(groupSkippedByPlatform([]), []);
+  assert.deepEqual(groupSkippedByPlatform(null), []);
+  assert.deepEqual(summarizeSkipped(undefined), { byPlatform: [], platforms: 0, stores: 0 });
+});
 
 test('插件导出契约：name / inject / apply / VERSION', () => {
   assert.equal(name, 'customer-service');

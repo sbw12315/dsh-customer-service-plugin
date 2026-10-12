@@ -120,13 +120,18 @@ console.log(`设置    : ${file}`);
 console.log(`数据目录: ${dataDir}`);
 
 if (args.list || args.listAll) {
-  // 与巡逻页的「扫描可用店铺」走同一套逻辑：全量 → 过滤出能巡逻的。
+  // 与巡逻页的「扫描可用店铺」走同一套逻辑：全量 → 过滤出能巡逻的（含停用店排除）。
   const all = await adapter.listAllStores();
-  const stores = all.filter(isAmazonStore);
+  const stores = await adapter.listStores();
   console.log(`\n账号下共 ${all.length} 家店铺，其中可巡逻的亚马逊店 ${stores.length} 家：`);
   for (const store of stores) console.log(`  · ${store.storeName}  [${store.storeId}]  ${store.platformName}`);
+  const retired = all.filter((store) => store.retired === true);
+  if (retired.length) {
+    console.log(`\n已停用的店铺 ${retired.length} 家（不巡逻，店名带「停用/disabled」）：`);
+    for (const store of retired) console.log(`  · ${store.storeName}  [${store.storeId}]  ${store.platformName}`);
+  }
   if (args.listAll) {
-    const skipped = all.filter((store) => !isAmazonStore(store));
+    const skipped = all.filter((store) => !isAmazonStore(store) && !store.retired);
     console.log(`\n非亚马逊店铺 ${skipped.length} 家（当前不巡逻）：`);
     for (const store of skipped) console.log(`  · ${store.storeName}  [${store.storeId}]  ${store.platformName}`);
   }
